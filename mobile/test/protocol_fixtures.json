@@ -1,0 +1,246 @@
+{
+  "description": "Conformance fixtures. The Dart and Python implementations must both reproduce these exactly. See docs/protocol.md.",
+  "payload_hashes": [
+    {
+      "payload": {},
+      "canonical_json": "{}",
+      "payload_hash": "44136fa355b3678a"
+    },
+    {
+      "payload": {
+        "a": 1,
+        "b": "two",
+        "c": [
+          1,
+          2,
+          3
+        ]
+      },
+      "canonical_json": "{\"a\":1,\"b\":\"two\",\"c\":[1,2,3]}",
+      "payload_hash": "81b1e3981153aa12"
+    },
+    {
+      "payload": {
+        "c": [
+          1,
+          2,
+          3
+        ],
+        "b": "two",
+        "a": 1
+      },
+      "canonical_json": "{\"a\":1,\"b\":\"two\",\"c\":[1,2,3]}",
+      "payload_hash": "81b1e3981153aa12"
+    },
+    {
+      "payload": {
+        "text": "three people trapped near the bridge",
+        "people_count": 3
+      },
+      "canonical_json": "{\"people_count\":3,\"text\":\"three people trapped near the bridge\"}",
+      "payload_hash": "996bff90c8e2c883"
+    },
+    {
+      "payload": {
+        "unicode": "水位が上昇 — ü ñ",
+        "nested": {
+          "z": 1,
+          "a": {
+            "deep": true
+          }
+        }
+      },
+      "canonical_json": "{\"nested\":{\"a\":{\"deep\":true},\"z\":1},\"unicode\":\"水位が上昇 — ü ñ\"}",
+      "payload_hash": "b1d2a6dca1f30ebc"
+    },
+    {
+      "payload": {
+        "null_field": null,
+        "float": 1.5,
+        "bool": false
+      },
+      "canonical_json": "{\"bool\":false,\"float\":1.5,\"null_field\":null}",
+      "payload_hash": "dd0f79a09af45398"
+    }
+  ],
+  "packets": [
+    {
+      "created": {
+        "packet_id": "pkt-0000000000000001",
+        "origin_node": "node-07",
+        "destination": "gateway",
+        "message_type": "SOS",
+        "priority": "LIFE_CRITICAL",
+        "ttl": 10,
+        "hop_count": 0,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "b2531313ef7249cb",
+        "path": [],
+        "payload": {
+          "report_id": "rpt-8a1f2c",
+          "node_id": "node-07",
+          "note": "trapped, water rising",
+          "location": {
+            "lat": 12.9716,
+            "lon": 77.5946,
+            "accuracy_m": 20.0
+          },
+          "people_count": 3
+        }
+      },
+      "encoded": "{\"created_at\":\"2026-09-06T12:00:00.000Z\",\"destination\":\"gateway\",\"hop_count\":0,\"message_type\":\"SOS\",\"origin_node\":\"node-07\",\"packet_id\":\"pkt-0000000000000001\",\"path\":[],\"payload\":{\"location\":{\"accuracy_m\":20.0,\"lat\":12.9716,\"lon\":77.5946},\"node_id\":\"node-07\",\"note\":\"trapped, water rising\",\"people_count\":3,\"report_id\":\"rpt-8a1f2c\"},\"payload_hash\":\"b2531313ef7249cb\",\"priority\":\"LIFE_CRITICAL\",\"ttl\":10}",
+      "after_two_hops": {
+        "packet_id": "pkt-0000000000000001",
+        "origin_node": "node-07",
+        "destination": "gateway",
+        "message_type": "SOS",
+        "priority": "LIFE_CRITICAL",
+        "ttl": 8,
+        "hop_count": 2,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "b2531313ef7249cb",
+        "path": [
+          "node-12",
+          "node-31"
+        ],
+        "payload": {
+          "report_id": "rpt-8a1f2c",
+          "node_id": "node-07",
+          "note": "trapped, water rising",
+          "location": {
+            "lat": 12.9716,
+            "lon": 77.5946,
+            "accuracy_m": 20.0
+          },
+          "people_count": 3
+        }
+      }
+    },
+    {
+      "created": {
+        "packet_id": "pkt-00000000000000a2",
+        "origin_node": "node-12",
+        "destination": "*",
+        "message_type": "HELLO",
+        "priority": "NORMAL",
+        "ttl": 1,
+        "hop_count": 0,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "5874b5c3fa30839c",
+        "path": [],
+        "payload": {
+          "node_id": "node-12",
+          "role": "RELAY",
+          "battery": 0.67,
+          "gateway_distance": 2,
+          "seq": 481
+        }
+      },
+      "encoded": "{\"created_at\":\"2026-09-06T12:00:00.000Z\",\"destination\":\"*\",\"hop_count\":0,\"message_type\":\"HELLO\",\"origin_node\":\"node-12\",\"packet_id\":\"pkt-00000000000000a2\",\"path\":[],\"payload\":{\"battery\":0.67,\"gateway_distance\":2,\"node_id\":\"node-12\",\"role\":\"RELAY\",\"seq\":481},\"payload_hash\":\"5874b5c3fa30839c\",\"priority\":\"NORMAL\",\"ttl\":1}",
+      "after_two_hops": {
+        "packet_id": "pkt-00000000000000a2",
+        "origin_node": "node-12",
+        "destination": "*",
+        "message_type": "HELLO",
+        "priority": "NORMAL",
+        "ttl": -1,
+        "hop_count": 2,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "5874b5c3fa30839c",
+        "path": [
+          "node-12",
+          "node-31"
+        ],
+        "payload": {
+          "node_id": "node-12",
+          "role": "RELAY",
+          "battery": 0.67,
+          "gateway_distance": 2,
+          "seq": 481
+        }
+      }
+    },
+    {
+      "created": {
+        "packet_id": "pkt-00000000000000b3",
+        "origin_node": "node-31",
+        "destination": "node-07",
+        "message_type": "ACK",
+        "priority": "OPERATIONAL",
+        "ttl": 6,
+        "hop_count": 0,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "16cc540f06eae3ad",
+        "path": [],
+        "payload": {
+          "ack_packet_id": "pkt-0000000000000001",
+          "by_node": "node-31",
+          "status": "DELIVERED"
+        }
+      },
+      "encoded": "{\"created_at\":\"2026-09-06T12:00:00.000Z\",\"destination\":\"node-07\",\"hop_count\":0,\"message_type\":\"ACK\",\"origin_node\":\"node-31\",\"packet_id\":\"pkt-00000000000000b3\",\"path\":[],\"payload\":{\"ack_packet_id\":\"pkt-0000000000000001\",\"by_node\":\"node-31\",\"status\":\"DELIVERED\"},\"payload_hash\":\"16cc540f06eae3ad\",\"priority\":\"OPERATIONAL\",\"ttl\":6}",
+      "after_two_hops": {
+        "packet_id": "pkt-00000000000000b3",
+        "origin_node": "node-31",
+        "destination": "node-07",
+        "message_type": "ACK",
+        "priority": "OPERATIONAL",
+        "ttl": 4,
+        "hop_count": 2,
+        "created_at": "2026-09-06T12:00:00.000Z",
+        "payload_hash": "16cc540f06eae3ad",
+        "path": [
+          "node-12",
+          "node-31"
+        ],
+        "payload": {
+          "ack_packet_id": "pkt-0000000000000001",
+          "by_node": "node-31",
+          "status": "DELIVERED"
+        }
+      }
+    }
+  ],
+  "relay_scores": [
+    {
+      "inputs": {
+        "battery": 1.0,
+        "neighbor_count": 8,
+        "gateway_distance": 0,
+        "link_stability": 1.0,
+        "mobility_mps": 0.0
+      },
+      "relay_score": 1.0
+    },
+    {
+      "inputs": {
+        "battery": 0.5,
+        "neighbor_count": 4,
+        "gateway_distance": 2,
+        "link_stability": 0.8,
+        "mobility_mps": 1.0
+      },
+      "relay_score": 0.556667
+    },
+    {
+      "inputs": {
+        "battery": 0.1,
+        "neighbor_count": 1,
+        "gateway_distance": null,
+        "link_stability": 0.2,
+        "mobility_mps": 5.0
+      },
+      "relay_score": 0.085
+    },
+    {
+      "inputs": {
+        "battery": 0.67,
+        "neighbor_count": 6,
+        "gateway_distance": 3,
+        "link_stability": 0.88,
+        "mobility_mps": 0.5
+      },
+      "relay_score": 0.668
+    }
+  ]
+}

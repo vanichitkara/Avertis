@@ -1,0 +1,21 @@
+# Flutter / Dart
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins-dependencies
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+*.iml
+
+# Python
+simulator/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Simulator output
+simulator/out/
+
+# OS
+.DS_Store
