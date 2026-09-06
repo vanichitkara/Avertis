@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'core/providers.dart';
 import 'core/theme.dart';
 import 'features/home/home_screen.dart';
+import 'features/map/mesh_map_screen.dart';
 import 'features/mesh/mesh_screen.dart';
 import 'features/reports/report_screen.dart';
 import 'features/reports/reports_list_screen.dart';
@@ -25,6 +26,7 @@ final _router = GoRouter(
     ),
     GoRoute(path: '/reports', builder: (_, __) => const ReportsListScreen()),
     GoRoute(path: '/mesh', builder: (_, __) => const MeshScreen()),
+    GoRoute(path: '/situation', builder: (_, __) => const MeshMapScreen()),
   ],
 );
 

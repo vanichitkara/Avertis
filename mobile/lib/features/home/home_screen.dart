@@ -26,6 +26,11 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('AVERTIS'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.radar),
+            tooltip: 'Situation view',
+            onPressed: () => context.push('/situation'),
+          ),
+          IconButton(
             icon: const Icon(Icons.hub_outlined),
             tooltip: 'Mesh detail',
             onPressed: () => context.push('/mesh'),

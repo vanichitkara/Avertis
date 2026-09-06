@@ -94,27 +94,35 @@ cd mobile && flutter test
 - Heartbeat failure detection, partition detection, relay election,
   self-healing
 - Dart mesh engine, byte-identical to the Python one against shared fixtures
-- Mock and BLE transports behind one abstraction; BLE framing unit-tested
+- Mock and BLE transports behind one abstraction. BLE runs **both** roles:
+  `flutter_blue_plus` for the central half, and a Kotlin platform channel for
+  the peripheral half (advertising + GATT server) it does not implement
 - Flutter app: home, SOS, incident report, report list, mesh detail; reports
   persisted to SQLite before transmission, and unacknowledged reports
   re-offered to the mesh on next launch (Phase 3)
 - Real GPS via geolocator, with the UI stating exactly what it knows —
   a fix and its accuracy, a stale fix, or no fix at all
+- Voice reports (60 s cap, descriptor over the mesh, audio at the gateway)
+- Foreground service so the mesh keeps relaying with the screen off, with the
+  home screen saying plainly when it is not running
+- Offline situation view: live bearings, distances and link quality drawn from
+  measured state — no tiles, no API key, no network
 - Verified running on an Android emulator: SOS sent, persisted, restored
   after a reinstall, and correctly shown as "waiting to be confirmed"
 - Gateway client with critical-first sync under a window budget, both languages
 - Seven scenarios, resilience benchmark, replay system
 - Mock gateway API server — a reference implementation of the contract for
   the backend workstream, plus HTTP integration tests against it
-- 51 Python tests, 40 Dart tests, Android APK builds and runs
+- 51 Python tests, 66 Dart tests, Android APK builds and runs
 
 **Not done**
 
-- BLE on physical handsets — written and unit-tested, never run on real radios
-- Voice capture (the `record` dependency is in place, the UI is not)
-- Map view
-- Foreground service, so the mesh keeps relaying with the screen off
+- **BLE has never run on real radios.** Both roles are implemented and their
+  pure logic is tested, but no two physical phones have ever exchanged a
+  packet. Emulators have no BLE, so this cannot be closed without hardware —
+  it is the one gap that only handsets can close.
+- Photo and audio upload to Cloud Storage (descriptors travel; bytes do not
+  yet leave the device)
 - Everything on my teammate's side, and the integration against it
-
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`
 for measured results, including the ones that are unflattering.

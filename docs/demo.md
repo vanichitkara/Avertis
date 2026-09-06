@@ -136,11 +136,31 @@ Set the transport to BLE (`transportModeProvider` → `TransportMode.ble`) and
 install on 2–3 phones. Phone A → Phone B → Phone C with B's Bluetooth turned
 off mid-demo shows detection, re-election and recovery on real radios.
 
-**Status:** the BLE transport is written and its framing is unit-tested
-(fragmentation, out-of-order reassembly, corrupt frames), but it has **not yet
-been run on physical handsets** — I have no paired devices here. Everything
-above it is transport-agnostic and is proven against the mock radio, which is
-the point of the abstraction. Treat physical BLE as the remaining unknown.
+**Status.** Both BLE roles are now implemented. `flutter_blue_plus` provides
+only the central half — it cannot advertise or host a GATT server — so a
+Kotlin platform channel supplies the peripheral half. Before that was added
+the transport could not have worked at all: every node scanned for a service
+nothing advertised.
+
+It has still **never run on physical handsets**. Emulators have no BLE radio,
+so this cannot be closed here at any level of effort — it needs two phones.
+What is proven: the framing (fragmentation, out-of-order reassembly, corrupt
+and runt frames), the channel contract and its failure modes, and every layer
+above the transport against the mock radio. What is unproven: that two real
+Android radios discover each other, negotiate an MTU, and sustain a
+connection. Budget real time for this; it is the classic place a BLE project
+loses a day.
+
+Note also that two emulator instances cannot substitute: each app process has
+its own in-process `MockRadioSpace`, so they do not see each other either.
+
+### Background relaying
+
+Verified on the emulator both ways. With permissions granted the service
+reports `isForeground=true` with the `connectedDevice` type and an ongoing
+notification that mirrors neighbours, queue depth and custody. With every
+permission denied the app runs normally, zero crashes, and the home screen
+says the phone will only relay while Avertis is open.
 
 ---
 

@@ -5,6 +5,8 @@
 /// reporter who believes their chosen priority is final will misuse it.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +14,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../mesh/protocol/packet.dart';
+import '../../services/voice_recorder.dart';
 
 class ReportScreen extends ConsumerStatefulWidget {
   const ReportScreen({super.key, this.locationOnly = false});
@@ -24,8 +27,11 @@ class ReportScreen extends ConsumerStatefulWidget {
 
 class _ReportScreenState extends ConsumerState<ReportScreen> {
   final _textController = TextEditingController();
+  final _recorder = VoiceRecorder();
   Priority _priority = Priority.emergency;
   XFile? _photo;
+  VoiceRecording? _voice;
+  Timer? _tick;
   bool _sending = false;
 
   @override
@@ -39,8 +45,40 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
   @override
   void dispose() {
+    _tick?.cancel();
     _textController.dispose();
+    unawaited(_recorder.dispose());
     super.dispose();
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_recorder.status == RecorderStatus.recording) {
+      final recording = await _recorder.stop();
+      _tick?.cancel();
+      if (mounted) setState(() => _voice = recording);
+      return;
+    }
+
+    final started = await _recorder.start();
+    if (!mounted) return;
+    if (!started) {
+      final reason = _recorder.status == RecorderStatus.denied
+          ? 'Microphone permission is needed to record a voice report.'
+          : 'Recording is not available on this device.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(reason)));
+      return;
+    }
+    // Drive the elapsed counter so the 60s cap is visible, not a surprise.
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    setState(() {});
+  }
+
+  Future<void> _discardRecording() async {
+    await _recorder.cancel();
+    if (mounted) setState(() => _voice = null);
   }
 
   Future<void> _attachPhoto() async {
@@ -53,7 +91,15 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   }
 
   Future<void> _send() async {
-    final text = _textController.text.trim();
+    var text = _textController.text.trim();
+    // A voice-only report is legitimate — someone may be unable to type. The
+    // placeholder is honest that the words are not known on this device: only
+    // the backend can transcribe, and inventing a summary here would put
+    // words in a survivor's mouth.
+    if (text.isEmpty && _voice != null) {
+      text = 'Voice report (${_voice!.duration.inSeconds}s) — not yet '
+          'transcribed.';
+    }
     if (text.isEmpty) return;
     setState(() => _sending = true);
 
@@ -67,6 +113,15 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           'media_id': 'med-${DateTime.now().millisecondsSinceEpoch}',
           'local_path': _photo!.path,
           'bytes': await _photo!.length(),
+          'inline': false,
+        },
+      if (_voice != null)
+        {
+          'kind': 'AUDIO',
+          'media_id': 'med-${DateTime.now().millisecondsSinceEpoch}-a',
+          'local_path': _voice!.path,
+          'bytes': _voice!.bytes,
+          'duration_s': _voice!.duration.inSeconds,
           'inline': false,
         },
     ];
@@ -145,6 +200,14 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   TextStyle(fontSize: 11, color: AvertisColors.textSecondary),
             ),
             const SizedBox(height: 20),
+            _VoiceControl(
+              status: _recorder.status,
+              elapsed: _recorder.elapsed,
+              recording: _voice,
+              onToggle: _toggleRecording,
+              onDiscard: _discardRecording,
+            ),
+            const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _attachPhoto,
               icon: const Icon(Icons.camera_alt_outlined),
@@ -188,4 +251,88 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
         Priority.operational => 'Coordination and logistics',
         Priority.normal => 'Background information',
       };
+}
+
+
+/// Record / stop / discard, with the elapsed time and the cap always visible.
+class _VoiceControl extends StatelessWidget {
+  const _VoiceControl({
+    required this.status,
+    required this.elapsed,
+    required this.recording,
+    required this.onToggle,
+    required this.onDiscard,
+  });
+
+  final RecorderStatus status;
+  final Duration elapsed;
+  final VoiceRecording? recording;
+  final VoidCallback onToggle;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRecording = status == RecorderStatus.recording;
+
+    if (recording != null && !isRecording) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AvertisColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AvertisColors.online),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.graphic_eq, color: AvertisColors.online, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Voice report · ${recording!.duration.inSeconds}s',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 14)),
+                  const Text(
+                    'Sent when a gateway is reachable — the mesh carries only '
+                    'its description.',
+                    style: TextStyle(
+                        fontSize: 11, color: AvertisColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: onDiscard,
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Discard recording',
+              color: AvertisColors.textSecondary,
+            ),
+          ],
+        ),
+      );
+    }
+
+    final remaining = maxRecordingDuration - elapsed;
+    return OutlinedButton.icon(
+      onPressed: onToggle,
+      icon: Icon(isRecording ? Icons.stop_circle : Icons.mic_none),
+      label: Text(
+        isRecording
+            ? 'STOP · ${elapsed.inSeconds}s '
+                '(${remaining.inSeconds}s left)'
+            : 'RECORD VOICE REPORT',
+      ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(52),
+        foregroundColor:
+            isRecording ? AvertisColors.lifeCritical : AvertisColors.textPrimary,
+        side: BorderSide(
+          color: isRecording
+              ? AvertisColors.lifeCritical
+              : AvertisColors.outline,
+        ),
+      ),
+    );
+  }
 }
