@@ -16,6 +16,7 @@ import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../protocol/packet.dart';
+import 'ble_peripheral.dart';
 import 'mesh_transport.dart';
 
 /// Service and characteristic UUIDs. Placeholders until the BLE bring-up —
@@ -24,6 +25,11 @@ final Guid avertisServiceUuid =
     Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000001');
 final Guid avertisTxCharacteristic =
     Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000002');
+
+/// The characteristic a peer's *peripheral* half notifies us on. We subscribe
+/// to this on every peer we connect to as a central.
+final Guid avertisNotifyCharacteristic =
+    Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000003');
 
 /// Conservative payload per write; MTU is negotiated but not relied upon.
 const int safeFragmentBytes = 180;
@@ -107,8 +113,34 @@ class Reassembly {
   }
 }
 
+/// A BLE node runs *both* roles at once.
+///
+/// As a **central** it scans, connects to peers and writes frames to them.
+/// As a **peripheral** it advertises so other phones can find it, and hosts
+/// the GATT server they write to. `flutter_blue_plus` only provides the first
+/// half; [BlePeripheral] bridges to Kotlin for the second. Running only the
+/// central half would mean nobody is ever discoverable and the mesh never
+/// forms — which is precisely the failure this class exists to avoid.
 class BleMeshTransport extends MeshTransport {
-  BleMeshTransport(super.nodeId);
+  BleMeshTransport(
+    super.nodeId, {
+    required this.role,
+    this.battery = 1.0,
+    BlePeripheral? peripheral,
+  }) : peripheral = peripheral ?? BlePeripheral();
+
+  /// Advertised so peers can score this node before connecting.
+  final NodeRole role;
+  final double battery;
+
+  /// The peripheral half. Kept public so the UI can surface advertising state
+  /// — a node that cannot advertise is only half a mesh node.
+  final BlePeripheral peripheral;
+
+  /// Peers reachable because *they* connected to *us*. We answer them through
+  /// the peripheral's notify characteristic rather than dialling back, which
+  /// would race with their own connection.
+  final Set<String> _inboundPeers = {};
 
   final _incoming =
       StreamController<({String from, Packet packet})>.broadcast();
@@ -121,6 +153,7 @@ class BleMeshTransport extends MeshTransport {
   final Map<String, StreamSubscription<dynamic>> _valueSubs = {};
 
   StreamSubscription<List<ScanResult>>? _scanSub;
+  final List<StreamSubscription<dynamic>> _peripheralSubs = [];
   Timer? _scanTimer;
   bool _running = false;
 
@@ -134,7 +167,15 @@ class BleMeshTransport extends MeshTransport {
   Stream<String> get peerLost => _peerLost.stream;
 
   @override
-  List<String> get peers => _writeChars.keys.toList()..sort();
+  List<String> get peers =>
+      {..._writeChars.keys, ..._inboundPeers}.toList()..sort();
+
+  /// True when this node is discoverable by other phones.
+  bool get isAdvertising => peripheral.state.advertising;
+
+  /// Non-null when the peripheral half is not running, with a reason the UI
+  /// can show.
+  String? get peripheralWarning => peripheral.state.message;
 
   @override
   Future<void> start() async {
@@ -143,6 +184,25 @@ class BleMeshTransport extends MeshTransport {
       throw StateError('Bluetooth is not supported on this device');
     }
     _running = true;
+
+    // Peripheral half first: start being findable before looking for others,
+    // so two phones starting together can see each other on the first scan.
+    _peripheralSubs.addAll([
+      peripheral.payloads.listen((m) => _onFrame(m.deviceId, m.bytes)),
+      peripheral.peerConnected.listen((id) {
+        _inboundPeers.add(id);
+        _peerFound.add(PeerInfo(nodeId: id));
+      }),
+      peripheral.peerDisconnected.listen((id) {
+        _inboundPeers.remove(id);
+        if (!_writeChars.containsKey(id)) _dropPeer(id);
+      }),
+    ]);
+    await peripheral.start(
+      nodeId: nodeId,
+      role: role.wire,
+      battery: battery,
+    );
 
     _scanSub = FlutterBluePlus.scanResults.listen(_onScanResults);
     // Scan in windows rather than continuously — a continuous scan is the
@@ -206,14 +266,18 @@ class BleMeshTransport extends MeshTransport {
       for (final service in services) {
         if (service.serviceUuid != avertisServiceUuid) continue;
         for (final characteristic in service.characteristics) {
-          if (characteristic.characteristicUuid != avertisTxCharacteristic) {
-            continue;
+          // We write frames to the peer here...
+          if (characteristic.characteristicUuid == avertisTxCharacteristic) {
+            _writeChars[peerId] = characteristic;
           }
-          _writeChars[peerId] = characteristic;
-          await characteristic.setNotifyValue(true);
-          _valueSubs[peerId] = characteristic.onValueReceived.listen(
-            (value) => _onFrame(peerId, Uint8List.fromList(value)),
-          );
+          // ...and the peer notifies us back here.
+          if (characteristic.characteristicUuid ==
+              avertisNotifyCharacteristic) {
+            await characteristic.setNotifyValue(true);
+            _valueSubs[peerId] = characteristic.onValueReceived.listen(
+              (value) => _onFrame(peerId, Uint8List.fromList(value)),
+            );
+          }
         }
       }
       device.connectionState.listen((state) {
@@ -244,16 +308,26 @@ class BleMeshTransport extends MeshTransport {
   @override
   Future<bool> send(String toNode, Packet packet) async {
     final characteristic = _writeChars[toNode];
-    if (characteristic == null) return false;
-    try {
-      for (final frame in BleFraming.fragment(packet)) {
-        await characteristic.write(frame, withoutResponse: false);
+    if (characteristic != null) {
+      try {
+        for (final frame in BleFraming.fragment(packet)) {
+          await characteristic.write(frame, withoutResponse: false);
+        }
+        return true;
+      } on Exception {
+        _dropPeer(toNode);
+        // Fall through: the peer may still be reachable inbound.
       }
-      return true;
-    } on Exception {
-      _dropPeer(toNode);
-      return false;
     }
+    // The peer connected to us, so answer it over our own notify
+    // characteristic instead of dialling back.
+    if (_inboundPeers.contains(toNode)) {
+      return peripheral.send(
+        toNode,
+        Uint8List.fromList(packet.encode()),
+      );
+    }
+    return false;
   }
 
   @override
@@ -270,6 +344,12 @@ class BleMeshTransport extends MeshTransport {
     _running = false;
     _scanTimer?.cancel();
     await _scanSub?.cancel();
+    for (final sub in _peripheralSubs) {
+      await sub.cancel();
+    }
+    _peripheralSubs.clear();
+    await peripheral.stop();
+    _inboundPeers.clear();
     try {
       await FlutterBluePlus.stopScan();
     } on Exception {
@@ -292,6 +372,7 @@ class BleMeshTransport extends MeshTransport {
 
   Future<void> dispose() async {
     await stop();
+    await peripheral.dispose();
     await _incoming.close();
     await _peerFound.close();
     await _peerLost.close();

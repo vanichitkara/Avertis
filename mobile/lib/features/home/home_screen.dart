@@ -19,6 +19,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(meshStatusProvider);
+    final controller = ref.watch(meshControllerProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -36,6 +37,12 @@ class HomeScreen extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
             _ConnectivityCard(status: status),
+            if (!controller.backgroundRelayActive) ...[
+              const SizedBox(height: 12),
+              _RelayWarning(
+                canRelay: controller.grantedPermissions.canRelayInBackground,
+              ),
+            ],
             const SizedBox(height: 20),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -174,6 +181,49 @@ class _ConnectivityCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A phone that stops relaying when pocketed is a dead spot its neighbours
+/// have already routed through, and they will not notice until their beacons
+/// time out. That is worth stating plainly rather than hiding.
+class _RelayWarning extends StatelessWidget {
+  const _RelayWarning({required this.canRelay});
+
+  final bool canRelay;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AvertisColors.operational.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: AvertisColors.operational.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 18, color: AvertisColors.operational),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              canRelay
+                  ? 'Background relaying is not running. This phone will stop '
+                      'carrying other people\'s messages when the screen '
+                      'turns off.'
+                  : 'Bluetooth and notification permissions are needed to keep '
+                      'relaying with the screen off. Without them this phone '
+                      'only relays while Avertis is open.',
+              style: const TextStyle(
+                  fontSize: 12, color: AvertisColors.operational),
+            ),
+          ),
+        ],
       ),
     );
   }

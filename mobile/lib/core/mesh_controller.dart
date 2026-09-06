@@ -15,6 +15,8 @@ import '../mesh/transport/ble_mesh_transport.dart';
 import '../mesh/transport/mesh_transport.dart';
 import '../mesh/transport/mock_mesh_transport.dart';
 import '../services/location_service.dart';
+import '../services/mesh_service_channel.dart';
+import '../services/permissions_service.dart';
 import 'package:drift/drift.dart' show Value;
 
 enum TransportMode {
@@ -83,6 +85,8 @@ class MeshController extends ChangeNotifier {
 
   final MeshEventBus bus = MeshEventBus();
   final LocationService locationService = LocationService();
+  final MeshServiceChannel meshService = MeshServiceChannel();
+  final PermissionsService permissions = PermissionsService();
   StreamSubscription<LocationState>? _locationSub;
   MeshEngine? _engine;
   MockRadioSpace? _mockSpace;
@@ -98,6 +102,7 @@ class MeshController extends ChangeNotifier {
   /// an in-flight ACK. Notifying a disposed notifier throws, so every path
   /// that notifies checks this first.
   bool _disposed = false;
+  String? _lastServiceFingerprint;
 
   /// Set by the gateway client / connectivity check. Offline is the default
   /// assumption — this app exists for when there is no internet.
@@ -107,6 +112,15 @@ class MeshController extends ChangeNotifier {
   /// assuming a fix exists — claiming a location we do not have would send
   /// responders to the wrong place.
   LocationState locationState = LocationState.unknown;
+
+  /// What the OS actually lets this node do. Read by the UI so it can say
+  /// which capability is missing instead of failing quietly.
+  MeshPermissions grantedPermissions = MeshPermissions.none;
+
+  /// True only once the foreground service is genuinely running. Android
+  /// refuses it without a Bluetooth runtime permission, so this is never
+  /// assumed — it is the value the platform returned.
+  bool backgroundRelayActive = false;
 
   Future<void> start({
     required String nodeId,
@@ -118,7 +132,7 @@ class MeshController extends ChangeNotifier {
     final MeshTransport transport;
     switch (mode) {
       case TransportMode.ble:
-        transport = BleMeshTransport(nodeId);
+        transport = BleMeshTransport(nodeId, role: role);
       case TransportMode.mock:
         _mockSpace = MockRadioSpace(rangeM: 120);
         final mock = MockMeshTransport(nodeId, _mockSpace!);
@@ -144,9 +158,26 @@ class MeshController extends ChangeNotifier {
       if (!_disposed) notifyListeners();
     });
     unawaited(locationService.start());
+
+    // Ask for what the mesh needs, then start background relaying only if the
+    // OS will actually allow it. Android refuses a connectedDevice foreground
+    // service without a Bluetooth runtime permission, so starting it blindly
+    // would either fail silently or crash the app.
+    unawaited(_startBackgroundRelay());
     _statusTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _refreshStatus());
     _refreshStatus();
+  }
+
+  Future<void> _startBackgroundRelay() async {
+    grantedPermissions = await permissions.request();
+    if (_disposed) return;
+    if (grantedPermissions.canRelayInBackground) {
+      backgroundRelayActive = await meshService.start();
+    } else {
+      backgroundRelayActive = false;
+    }
+    if (!_disposed) notifyListeners();
   }
 
   /// Re-offer reports that were never acknowledged before the app died.
@@ -223,6 +254,21 @@ class MeshController extends ChangeNotifier {
       gatewayDistance: engine.state.gatewayDistance,
       transport: mode,
     );
+
+    // The ongoing notification is the only mesh readout available when the
+    // app is closed, so keep it current — but only on real change, to avoid
+    // waking the notification manager every second.
+    final fingerprint = '${live.length}/${engine.queueDepth}/'
+        '${engine.custodyDepth}';
+    if (fingerprint != _lastServiceFingerprint) {
+      _lastServiceFingerprint = fingerprint;
+      unawaited(meshService.update(
+        neighbors: live.length,
+        queued: engine.queueDepth,
+        custody: engine.custodyDepth,
+      ));
+    }
+
     notifyListeners();
   }
 
@@ -292,6 +338,7 @@ class MeshController extends ChangeNotifier {
     _statusTimer?.cancel();
     unawaited(_locationSub?.cancel());
     unawaited(locationService.dispose());
+    unawaited(meshService.stop());
     unawaited(_engine?.stop());
     unawaited(bus.dispose());
     super.dispose();
