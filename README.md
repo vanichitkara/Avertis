@@ -96,16 +96,24 @@ cd mobile && flutter test
 - Dart mesh engine, byte-identical to the Python one against shared fixtures
 - Mock and BLE transports behind one abstraction; BLE framing unit-tested
 - Flutter app: home, SOS, incident report, report list, mesh detail; reports
-  persisted to SQLite before transmission (Phase 3)
+  persisted to SQLite before transmission, and unacknowledged reports
+  re-offered to the mesh on next launch (Phase 3)
+- Real GPS via geolocator, with the UI stating exactly what it knows —
+  a fix and its accuracy, a stale fix, or no fix at all
+- Verified running on an Android emulator: SOS sent, persisted, restored
+  after a reinstall, and correctly shown as "waiting to be confirmed"
 - Gateway client with critical-first sync under a window budget, both languages
 - Seven scenarios, resilience benchmark, replay system
-- 45 Python tests, 40 Dart tests, Android APK builds
+- Mock gateway API server — a reference implementation of the contract for
+  the backend workstream, plus HTTP integration tests against it
+- 51 Python tests, 40 Dart tests, Android APK builds and runs
 
 **Not done**
 
 - BLE on physical handsets — written and unit-tested, never run on real radios
 - Voice capture (the `record` dependency is in place, the UI is not)
 - Map view
+- Foreground service, so the mesh keeps relaying with the screen off
 - Everything on my teammate's side, and the integration against it
 
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`

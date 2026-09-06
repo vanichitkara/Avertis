@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
 import '../../core/theme.dart';
+import '../../services/location_service.dart';
 
 class SosScreen extends ConsumerStatefulWidget {
   const SosScreen({super.key});
@@ -122,7 +123,8 @@ class _SosScreenState extends ConsumerState<SosScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            _LocationNotice(hasLocation: status.nodeId != '—'),
+            _LocationNotice(
+                state: ref.watch(meshControllerProvider).locationState),
             const SizedBox(height: 24),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -159,33 +161,58 @@ class _SosScreenState extends ConsumerState<SosScreen> {
 }
 
 class _LocationNotice extends StatelessWidget {
-  const _LocationNotice({required this.hasLocation});
+  const _LocationNotice({required this.state});
 
-  final bool hasLocation;
+  final LocationState state;
 
   @override
   Widget build(BuildContext context) {
+    final (icon, color, message) = switch (state.availability) {
+      LocationAvailability.available when state.isStale => (
+          Icons.location_searching,
+          AvertisColors.operational,
+          'Using your last known location — it may be out of date.',
+        ),
+      LocationAvailability.available => (
+          Icons.my_location,
+          AvertisColors.online,
+          'Your location will be attached '
+              '(±${state.point!.accuracyM.round()} m).',
+        ),
+      LocationAvailability.waiting => (
+          Icons.location_searching,
+          AvertisColors.textSecondary,
+          'Still getting a location fix. Your SOS will be sent either way.',
+        ),
+      LocationAvailability.serviceDisabled => (
+          Icons.location_disabled,
+          AvertisColors.operational,
+          'Location is turned off on this device, so none will be attached.',
+        ),
+      LocationAvailability.denied ||
+      LocationAvailability.deniedForever =>
+        (
+          Icons.location_disabled,
+          AvertisColors.operational,
+          'Without location permission, responders will not know where you '
+              'are. The report will still be sent.',
+        ),
+    };
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(hasLocation ? Icons.my_location : Icons.location_disabled,
-            size: 16,
-            color: hasLocation
-                ? AvertisColors.online
-                : AvertisColors.textSecondary),
+        Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            hasLocation
-                ? 'Your location will be attached.'
-                : 'No location fix yet — the report will still be sent.',
-            style: const TextStyle(
-                fontSize: 12, color: AvertisColors.textSecondary),
-          ),
+          child: Text(message,
+              style: TextStyle(fontSize: 12, color: color)),
         ),
       ],
     );
   }
 }
+
 
 class _SosSentView extends ConsumerWidget {
   const _SosSentView({required this.reportId, required this.neighborCount});

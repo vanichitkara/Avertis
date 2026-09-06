@@ -121,6 +121,14 @@ cd mobile && flutter run
   cannot prove.
 - Mesh detail shows live neighbours with measured link stability, plus the
   running forwarded/delivered/dropped counters.
+- Location is real: the SOS screen states whether it has a fix and its
+  accuracy, whether the fix is stale, or that it has none. It never claims a
+  location it does not have.
+
+Verified on an Android emulator (Pixel 7, API 35): an SOS was sent with no
+nodes in range, persisted to SQLite, survived an app reinstall, was
+re-offered to the mesh on next launch, and was shown throughout as "waiting
+to be confirmed" rather than delivered.
 
 ### Multi-phone mesh demo (Phase 9)
 

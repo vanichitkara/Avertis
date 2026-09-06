@@ -14,6 +14,7 @@ import '../mesh/protocol/packet.dart';
 import '../mesh/transport/ble_mesh_transport.dart';
 import '../mesh/transport/mesh_transport.dart';
 import '../mesh/transport/mock_mesh_transport.dart';
+import '../services/location_service.dart';
 import 'package:drift/drift.dart' show Value;
 
 enum TransportMode {
@@ -81,6 +82,8 @@ class MeshController extends ChangeNotifier {
   final TransportMode mode;
 
   final MeshEventBus bus = MeshEventBus();
+  final LocationService locationService = LocationService();
+  StreamSubscription<LocationState>? _locationSub;
   MeshEngine? _engine;
   MockRadioSpace? _mockSpace;
   Timer? _statusTimer;
@@ -99,6 +102,11 @@ class MeshController extends ChangeNotifier {
   /// Set by the gateway client / connectivity check. Offline is the default
   /// assumption — this app exists for when there is no internet.
   bool _internetOnline = false;
+
+  /// What we actually know about our position. The UI reads this rather than
+  /// assuming a fix exists — claiming a location we do not have would send
+  /// responders to the wrong place.
+  LocationState locationState = LocationState.unknown;
 
   Future<void> start({
     required String nodeId,
@@ -130,6 +138,12 @@ class MeshController extends ChangeNotifier {
     await _restoreUnacknowledged(engine);
 
     bus.stream.listen(_onMeshEvent);
+    _locationSub = locationService.stream.listen((state) {
+      locationState = state;
+      _engine?.state.location = state.point;
+      if (!_disposed) notifyListeners();
+    });
+    unawaited(locationService.start());
     _statusTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _refreshStatus());
     _refreshStatus();
@@ -276,6 +290,8 @@ class MeshController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _statusTimer?.cancel();
+    unawaited(_locationSub?.cancel());
+    unawaited(locationService.dispose());
     unawaited(_engine?.stop());
     unawaited(bus.dispose());
     super.dispose();
