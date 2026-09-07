@@ -197,6 +197,12 @@ class _LocationNotice extends StatelessWidget {
           'Without location permission, responders will not know where you '
               'are. The report will still be sent.',
         ),
+      LocationAvailability.unavailable => (
+          Icons.location_disabled,
+          AvertisColors.operational,
+          'This device cannot provide a location, so none will be attached. '
+              'The report will still be sent.',
+        ),
     };
 
     return Row(

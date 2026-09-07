@@ -204,26 +204,36 @@ class AvertisBlePeripheral(
             .setTimeout(0)
             .build()
 
-        // The advertisement carries enough for a peer to score us before
-        // paying the cost of connecting (docs/protocol.md §7): 6-byte node id,
-        // 1-byte role, 1-byte battery.
+        // A legacy BLE advertisement is 31 bytes, total, and it is easy to
+        // exceed without noticing: the radio simply refuses to start with
+        // DATA_TOO_LARGE and the node is never discovered.
+        //
+        //   flags                       3 bytes  (added automatically)
+        //   128-bit service UUID   2 + 16 bytes
+        //                              = 21 bytes
+        //
+        // That leaves 10, which is not enough for manufacturer data (4 bytes
+        // of overhead plus our 8-byte payload = 12). So the UUID travels in
+        // the advertisement, where it is needed for filtered scanning, and
+        // everything else moves to the scan response — a second 31-byte
+        // budget that an active scan collects at the same time.
+        val data = AdvertiseData.Builder()
+            .setIncludeDeviceName(false)
+            .addServiceUuid(ParcelUuid(SERVICE_UUID))
+            .build()
+
+        // Enough for a peer to score us before paying the cost of connecting
+        // (docs/protocol.md §7): 6-byte node id, 1-byte role, 1-byte battery.
+        // 12 bytes with overhead, comfortably inside the scan response.
         val payload = ByteArray(8)
         val idBytes = nodeId.padEnd(6, ' ').substring(0, 6).toByteArray()
         idBytes.copyInto(payload, 0, 0, 6)
         payload[6] = roleCode(role)
         payload[7] = (battery.coerceIn(0.0, 1.0) * 255).toInt().toByte()
 
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false) // the name does not fit alongside the UUID
-            .addServiceUuid(ParcelUuid(SERVICE_UUID))
-            .addManufacturerData(MANUFACTURER_ID, payload)
-            .build()
-
-        // The scan response carries the readable name, which is what the
-        // central half falls back to when manufacturer data is unavailable.
         val scanResponse = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addServiceData(ParcelUuid(SERVICE_UUID), "AVX-$nodeId".toByteArray())
+            .addManufacturerData(MANUFACTURER_ID, payload)
             .build()
 
         adv.startAdvertising(settings, data, scanResponse, advertiseCallback)

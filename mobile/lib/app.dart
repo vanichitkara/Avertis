@@ -1,10 +1,13 @@
 /// App shell: routing, theme, and mesh startup.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/mesh_controller.dart';
 import 'core/providers.dart';
 import 'core/theme.dart';
 import 'features/home/home_screen.dart';
@@ -43,15 +46,32 @@ class _AvertisAppState extends ConsumerState<AvertisApp> {
     super.initState();
     // Start the mesh as soon as we have a stable node identity. The app is
     // useful the moment it opens — there is no sign-in, no setup, no account.
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final nodeId = await ref.read(nodeIdProvider.future);
-      if (!mounted) return;
-      await ref.read(meshControllerProvider).start(nodeId: nodeId);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startCurrentNode());
+  }
+
+  /// Start whichever controller is current.
+  ///
+  /// Switching the radio replaces the controller outright: Riverpod disposes
+  /// the old one and builds a new one. Without starting the replacement the
+  /// node goes silently dead — no engine, no transport, nothing relayed — and
+  /// the UI would still look fine. [MeshController.start] is idempotent, so
+  /// calling this more than once is harmless.
+  Future<void> _startCurrentNode() async {
+    final nodeId = await ref.read(nodeIdProvider.future);
+    if (!mounted) return;
+    await ref.read(meshControllerProvider).start(nodeId: nodeId);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Fires on every notifyListeners() with the same instance, and with a new
+    // instance only when the radio changed — which is the case that matters.
+    ref.listen<MeshController>(meshControllerProvider, (previous, next) {
+      if (previous != null && !identical(previous, next)) {
+        unawaited(_startCurrentNode());
+      }
+    });
+
     return MaterialApp.router(
       title: 'Avertis',
       debugShowCheckedModeBanner: false,

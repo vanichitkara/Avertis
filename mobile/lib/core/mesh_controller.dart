@@ -122,6 +122,16 @@ class MeshController extends ChangeNotifier {
   GatewayClient? get gateway => _gateway;
   bool get hasBackend => apiBase.isNotEmpty;
 
+  /// Why this node is not discoverable, when it is not.
+  ///
+  /// A node that scans but cannot advertise is only half a mesh node: it finds
+  /// others, but nobody finds it. That is invisible without being told, so the
+  /// mesh screen surfaces it.
+  String? get advertisingWarning {
+    final transport = _engine?.transport;
+    return transport is BleMeshTransport ? transport.peripheralWarning : null;
+  }
+
   MeshStatus _status = MeshStatus.empty;
   MeshStatus get status => _status;
 

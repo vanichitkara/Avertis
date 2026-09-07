@@ -19,7 +19,7 @@ source tool/env.sh
 (cd mobile && flutter test) && (cd simulator && .venv/bin/python -m pytest -q)
 ```
 
-Expect **84 Dart tests** and **51 Python tests**, all passing, in about five
+Expect **91 Dart tests** and **51 Python tests**, all passing, in about five
 seconds. If either fails, stop — everything below assumes these pass.
 
 ---
@@ -158,7 +158,10 @@ flutter run -d <serial-B>        # terminal 2
 ```
 
 Grant every permission when prompted — Bluetooth is refused silently
-otherwise. Then switch each phone to the BLE transport from the mesh screen.
+otherwise. Then on each phone open the mesh screen (the hub icon, top right)
+and switch the **RADIO** control from Simulated to Bluetooth. It confirms
+first: switching restarts the node, so neighbours are lost and rediscovered,
+though reports already in custody are kept.
 
 Work through it in this order, and expect to debug:
 

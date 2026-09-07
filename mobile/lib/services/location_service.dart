@@ -27,6 +27,10 @@ enum LocationAvailability {
 
   /// Permission granted but no fix yet.
   waiting,
+
+  /// No location capability at all on this platform or build. Distinct from
+  /// "denied": there is nothing the user could grant to fix it.
+  unavailable,
 }
 
 class LocationState {
@@ -54,7 +58,25 @@ class LocationService {
   Stream<LocationState> get stream => _controller.stream;
   LocationState current = LocationState.unknown;
 
+  /// Begin tracking, reporting availability rather than throwing.
+  ///
+  /// Every failure here is a *state the UI must show* — a disabled service, a
+  /// denied permission, a platform with no location at all — never an
+  /// exception. The mesh runs without a fix; it just cannot say where a
+  /// report came from, and the UI says exactly that instead of dying.
   Future<LocationState> start() async {
+    try {
+      return await _start();
+    } on Exception {
+      // No platform implementation (tests, desktop) or the plugin refused.
+      return _emit(const LocationState(LocationAvailability.unavailable));
+    } on Error {
+      // MissingPluginException surfaces as an Error on some platforms.
+      return _emit(const LocationState(LocationAvailability.unavailable));
+    }
+  }
+
+  Future<LocationState> _start() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       return _emit(const LocationState(LocationAvailability.serviceDisabled));
     }

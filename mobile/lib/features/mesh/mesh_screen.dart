@@ -7,6 +7,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/mesh_controller.dart';
+
 import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../mesh/node_state.dart';
@@ -28,6 +30,15 @@ class MeshScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _TransportSwitch(
+              mode: status.transport,
+              advertisingWarning: controller.advertisingWarning,
+            ),
+            const SizedBox(height: 12),
+            if (controller.hasBackend) ...[
+              _SyncCard(controller: controller),
+              const SizedBox(height: 12),
+            ],
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -164,6 +175,204 @@ class _NeighborTile extends StatelessWidget {
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Choose the radio.
+///
+/// Switching restarts the node: it leaves one mesh and joins another, so any
+/// neighbours are lost and rediscovered. Reports already in custody survive —
+/// they are on disk — but this is not a cosmetic toggle, and it says so.
+class _TransportSwitch extends ConsumerWidget {
+  const _TransportSwitch({required this.mode, required this.advertisingWarning});
+
+  final TransportMode mode;
+  final String? advertisingWarning;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isBle = mode == TransportMode.ble;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('RADIO',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 1.2)),
+            const SizedBox(height: 12),
+            SegmentedButton<TransportMode>(
+              segments: const [
+                ButtonSegment(
+                  value: TransportMode.mock,
+                  label: Text('Simulated'),
+                  icon: Icon(Icons.memory, size: 16),
+                ),
+                ButtonSegment(
+                  value: TransportMode.ble,
+                  label: Text('Bluetooth'),
+                  icon: Icon(Icons.bluetooth, size: 16),
+                ),
+              ],
+              selected: {mode},
+              onSelectionChanged: (selection) async {
+                final next = selection.first;
+                if (next == mode) return;
+                final confirmed = await _confirm(context, next);
+                if (!confirmed) return;
+                ref.read(transportModeProvider.notifier).state = next;
+              },
+            ),
+            const SizedBox(height: 10),
+            Text(
+              isBle
+                  ? 'Real Bluetooth LE. This node advertises so other phones '
+                      'can find it, and scans for theirs.'
+                  : 'Simulated radio, in this app only. Other phones cannot '
+                      'see this node — each app has its own simulated space.',
+              style: const TextStyle(
+                  fontSize: 11, color: AvertisColors.textSecondary),
+            ),
+            if (isBle && advertisingWarning != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      size: 16, color: AvertisColors.operational),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      advertisingWarning!,
+                      style: const TextStyle(
+                          fontSize: 11, color: AvertisColors.operational),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirm(BuildContext context, TransportMode next) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Switch radio?'),
+        content: Text(
+          next == TransportMode.ble
+              ? 'This node will restart on Bluetooth. Nearby nodes are lost '
+                  'and rediscovered. Reports already waiting are kept.'
+              : 'This node will restart on the simulated radio and will no '
+                  'longer reach other phones. Reports already waiting are '
+                  'kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('SWITCH'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+}
+
+/// Spend a connectivity window on demand.
+///
+/// Shown only when a backend is configured — offering a sync with nowhere to
+/// send it would be a button that always fails.
+class _SyncCard extends StatefulWidget {
+  const _SyncCard({required this.controller});
+
+  final MeshController controller;
+
+  @override
+  State<_SyncCard> createState() => _SyncCardState();
+}
+
+class _SyncCardState extends State<_SyncCard> {
+  bool _syncing = false;
+  String? _lastResult;
+
+  Future<void> _sync() async {
+    setState(() {
+      _syncing = true;
+      _lastResult = null;
+    });
+    final result = await widget.controller.syncNow();
+    if (!mounted) return;
+    setState(() {
+      _syncing = false;
+      _lastResult = switch (result) {
+        null => 'No backend configured.',
+        final r when !r.ok => 'Sync failed — everything is still held.',
+        final r => '${r.accepted} report(s) delivered'
+            '${r.deferred > 0 ? ', ${r.deferred} deferred' : ''}'
+            '${r.media.uploaded > 0 ? ', ${r.media.uploaded} file(s) sent' : ''}',
+      };
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final held = widget.controller.engine?.state.pendingReports.length ?? 0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('GATEWAY',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 1.2)),
+            const SizedBox(height: 8),
+            Text(
+              held == 0
+                  ? 'Nothing waiting to be sent.'
+                  : '$held report(s) waiting for a connectivity window.',
+              style: const TextStyle(
+                  fontSize: 12, color: AvertisColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _syncing ? null : _sync,
+              icon: _syncing
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cloud_upload_outlined, size: 18),
+              label: Text(_syncing ? 'SYNCING…' : 'SYNC NOW'),
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(46)),
+            ),
+            if (_lastResult != null) ...[
+              const SizedBox(height: 8),
+              Text(_lastResult!,
+                  style: const TextStyle(
+                      fontSize: 11, color: AvertisColors.textSecondary)),
+            ],
           ],
         ),
       ),

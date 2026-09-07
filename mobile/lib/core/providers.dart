@@ -23,8 +23,12 @@ final nodeIdProvider = FutureProvider<String>(
   (ref) => ref.watch(nodeIdentityProvider).nodeId(),
 );
 
-/// The transport is chosen once, at startup. BLE on a real device; the mock
-/// radio elsewhere so the whole app is still exercisable on an emulator.
+/// Which radio this node is on.
+///
+/// Defaults to the mock so the app is fully exercisable on an emulator, which
+/// has no Bluetooth. Switching is a real operational act — it tears the node
+/// out of one mesh and puts it in another — so it is deliberate, done from the
+/// mesh screen, and the home screen always names the radio in use.
 final transportModeProvider = StateProvider<TransportMode>(
   (ref) => TransportMode.mock,
 );
