@@ -12,6 +12,7 @@ import 'package:dio/dio.dart';
 import '../mesh/mesh_engine.dart';
 import '../mesh/mesh_events.dart';
 import '../mesh/protocol/packet.dart';
+import 'media_uploader.dart';
 
 /// What one second of a *recovered but degraded* uplink carries, in bytes.
 /// A brief opportunistic window during a disaster is congested and shared, so
@@ -30,6 +31,7 @@ class SyncResult {
     required this.bytesSent,
     this.incidentIds = const [],
     this.acceptedReportIds = const [],
+    this.media = MediaUploadResult.none,
     this.error,
   });
 
@@ -39,6 +41,9 @@ class SyncResult {
   final int bytesSent;
   final List<String> incidentIds;
   final List<String> acceptedReportIds;
+
+  /// What the leftover window carried, after the reports.
+  final MediaUploadResult media;
   final String? error;
 
   bool get ok => error == null;
@@ -88,11 +93,16 @@ class GatewayClient {
     required this.engine,
     required this.backend,
     required this.bus,
+    this.uploader,
   });
 
   final MeshEngine engine;
   final SyncBackend backend;
   final MeshEventBus bus;
+
+  /// Optional: without it, media descriptors still sync and the bytes simply
+  /// stay on the device. Reports are never held back waiting for photos.
+  final MediaUploader? uploader;
 
   final Set<String> _syncedReportIds = {};
 
@@ -137,7 +147,9 @@ class GatewayClient {
       'location': p['location'],
       'text': p['text'] ?? p['note'],
       'transcript': p['transcript'],
-      'media': p['media'] ?? const [],
+      // Device-local paths are stripped: they mean nothing off this handset
+      // and are not part of the frozen descriptor (docs/protocol.md §5).
+      'media': wireMediaDescriptors(p['media']),
       'hop_count': packet.hopCount,
       'path': packet.path,
     };
@@ -247,20 +259,49 @@ class GatewayClient {
       (p) => accepted.contains(p.payload['report_id']),
     );
 
+    // Only now, with the reports safely acknowledged, spend what is left of
+    // the window on the bytes. A photo is evidence; a report is a person.
+    var mediaResult = MediaUploadResult.none;
+    if (uploader != null && accepted.isNotEmpty) {
+      // Resolve files from the original packets, not the wire bodies — the
+      // latter have local_path stripped, which is exactly the field needed.
+      final pending = uploader!.pendingFor(
+        batch.map((packet) => {
+              'report_id': packet.payload['report_id'],
+              'media': packet.payload['media'] ?? const [],
+            }),
+        accepted.toSet(),
+      );
+      mediaResult = await uploader!.upload(
+        pending,
+        budgetBytes: (budget - used).clamp(0, maxSyncBytes),
+      );
+    }
+
     bus.emit(MeshEvent(MeshEventType.syncCompleted, engine.nodeId, {
       'accepted': accepted.length,
       'deferred': ordered.length - batch.length,
-      'bytes': used,
+      'bytes': used + mediaResult.bytesSent,
       'incident_ids': incidentIds.take(10).toList(),
+      if (mediaResult.uploaded > 0 ||
+          mediaResult.deferred > 0 ||
+          mediaResult.failed > 0)
+        'media': {
+          'uploaded': mediaResult.uploaded,
+          'deferred': mediaResult.deferred,
+          'failed': mediaResult.failed,
+          'bytes': mediaResult.bytesSent,
+        },
     }));
 
     return SyncResult(
       attempted: batch.length,
       accepted: accepted.length,
       deferred: ordered.length - batch.length,
-      bytesSent: used,
+      bytesSent: used + mediaResult.bytesSent,
       incidentIds: incidentIds,
       acceptedReportIds: accepted,
+      media: mediaResult,
     );
   }
 }

@@ -113,7 +113,7 @@ cd mobile && flutter test
 - Seven scenarios, resilience benchmark, replay system
 - Mock gateway API server — a reference implementation of the contract for
   the backend workstream, plus HTTP integration tests against it
-- 51 Python tests, 66 Dart tests, Android APK builds and runs
+- 51 Python tests, 84 Dart tests, Android APK builds and runs
 
 **Not done**
 
@@ -121,8 +121,6 @@ cd mobile && flutter test
   pure logic is tested, but no two physical phones have ever exchanged a
   packet. Emulators have no BLE, so this cannot be closed without hardware —
   it is the one gap that only handsets can close.
-- Photo and audio upload to Cloud Storage (descriptors travel; bytes do not
-  yet leave the device)
 - Everything on my teammate's side, and the integration against it
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`
 for measured results, including the ones that are unflattering.

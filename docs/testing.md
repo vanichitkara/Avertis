@@ -19,7 +19,7 @@ source tool/env.sh
 (cd mobile && flutter test) && (cd simulator && .venv/bin/python -m pytest -q)
 ```
 
-Expect **66 Dart tests** and **51 Python tests**, all passing, in about five
+Expect **84 Dart tests** and **51 Python tests**, all passing, in about five
 seconds. If either fails, stop — everything below assumes these pass.
 
 ---
@@ -71,8 +71,30 @@ contract, so the sync path is testable before the real backend exists:
     --gateway http://127.0.0.1:8787                        # terminal 2
 ```
 
+The mock server also implements `POST /api/v1/media/upload`, so the mobile
+upload path is testable before the backend exists:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/v1/media/upload \
+  -F media_id=med-1 -F report_id=rpt-1 -F sha256=abc -F file=@some.jpg
+curl http://127.0.0.1:8787/api/v1/debug/state    # media count should rise
+```
+
 When your teammate's backend is up, point `--gateway` at it instead. If the
 contract in `docs/api.md` holds, nothing else changes.
+
+### Pointing the app at a backend
+
+The app has no backend by default, which is the honest default for something
+built to work without one. Supply it at build time:
+
+```bash
+flutter run --dart-define=AVERTIS_API_BASE=http://10.0.2.2:8787
+```
+
+`10.0.2.2` is how the Android emulator reaches your Mac's localhost. Without
+this the mesh runs exactly as it otherwise would, holding reports in custody
+until a gateway appears.
 
 ---
 

@@ -35,6 +35,7 @@ class GatewayState:
         self.reports: dict[str, str] = {}       # report_id -> incident_id
         self.syncs: list[dict[str, Any]] = []
         self.nodes: dict[str, dict[str, Any]] = {}
+        self.media: dict[str, dict[str, Any]] = {}  # media_id -> descriptor
         self.next_incident = 1042
 
     def accept(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -98,6 +99,31 @@ class GatewayState:
 STATE = GatewayState()
 
 
+def _parse_multipart_fields(raw: bytes) -> dict[str, str]:
+    """Pull simple text form fields out of a multipart body.
+
+    Only the small text parts are decoded; the file part is left alone.
+    """
+    fields: dict[str, str] = {}
+    for part in raw.split(b"--"):
+        if b'name="' not in part:
+            continue
+        try:
+            name = part.split(b'name="', 1)[1].split(b'"', 1)[0].decode()
+        except (IndexError, UnicodeDecodeError):
+            continue
+        if b"filename=" in part:
+            continue  # the file itself, not a text field
+        if b"\r\n\r\n" not in part:
+            continue
+        value = part.split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n-")
+        try:
+            fields[name] = value.decode()
+        except UnicodeDecodeError:
+            continue
+    return fields
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -115,11 +141,15 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/v1/debug/state":
             self._send(200, {"reports": len(STATE.reports),
                              "syncs": len(STATE.syncs),
-                             "nodes": len(STATE.nodes)})
+                             "nodes": len(STATE.nodes),
+                             "media": len(STATE.media)})
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+        if self.path == "/api/v1/media/upload":
+            self._handle_media_upload()
+            return
         if self.path != "/api/v1/gateway/sync":
             self._send(404, {"error": "not found"})
             return
@@ -139,6 +169,33 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send(200, STATE.accept(body))
 
+    def _handle_media_upload(self) -> None:
+        """Accept a multipart media upload (docs/api.md).
+
+        Parsed loosely on purpose: this exists so the mobile uploader can be
+        exercised against real HTTP before the backend is up, not to be a
+        faithful multipart implementation.
+        """
+        length = int(self.headers.get("Content-Length", 0))
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"error": "payload too large"})
+            return
+
+        raw = self.rfile.read(length)
+        fields = _parse_multipart_fields(raw)
+        media_id = fields.get("media_id")
+        if not media_id:
+            self._send(400, {"error": "media_id is required"})
+            return
+
+        STATE.media[media_id] = {
+            "report_id": fields.get("report_id"),
+            "sha256": fields.get("sha256"),
+            "bytes": length,
+        }
+        self._send(200, {"media_id": media_id,
+                         "uri": f"gs://avertis-mock/{media_id}"})
+
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"  [gateway] {fmt % args}")
 
@@ -146,7 +203,8 @@ class Handler(BaseHTTPRequestHandler):
 def serve(port: int = 8000) -> None:
     server = HTTPServer(("127.0.0.1", port), Handler)
     print(f"Mock Avertis gateway API on http://127.0.0.1:{port}")
-    print("  POST /api/v1/gateway/sync   GET /api/v1/health")
+    print("  POST /api/v1/gateway/sync   POST /api/v1/media/upload")
+    print("  GET  /api/v1/health         GET  /api/v1/debug/state")
     server.serve_forever()
 
 

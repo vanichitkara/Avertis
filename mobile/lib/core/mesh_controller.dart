@@ -15,6 +15,8 @@ import '../mesh/transport/ble_mesh_transport.dart';
 import '../mesh/transport/mesh_transport.dart';
 import '../mesh/transport/mock_mesh_transport.dart';
 import '../services/location_service.dart';
+import '../services/gateway_client.dart';
+import '../services/media_uploader.dart';
 import '../services/mesh_service_channel.dart';
 import '../services/permissions_service.dart';
 import 'package:drift/drift.dart' show Value;
@@ -74,14 +76,31 @@ class MeshStatus {
   );
 }
 
+/// Where the backend lives, supplied at build time:
+///
+///   flutter run --dart-define=AVERTIS_API_BASE=https://... \
+///               --dart-define=AVERTIS_API_KEY=...
+///
+/// Empty by default, and that is the honest default: this app is built for
+/// having no backend to reach. Without it the mesh runs exactly as it does
+/// now, holding reports in custody until a gateway appears.
+const String avertisApiBase =
+    String.fromEnvironment('AVERTIS_API_BASE', defaultValue: '');
+const String avertisApiKey =
+    String.fromEnvironment('AVERTIS_API_KEY', defaultValue: '');
+
 class MeshController extends ChangeNotifier {
   MeshController({
     required this.database,
     this.mode = TransportMode.mock,
+    this.apiBase = avertisApiBase,
+    this.apiKey = avertisApiKey,
   });
 
   final ReportDatabase database;
   final TransportMode mode;
+  final String apiBase;
+  final String apiKey;
 
   final MeshEventBus bus = MeshEventBus();
   final LocationService locationService = LocationService();
@@ -92,8 +111,16 @@ class MeshController extends ChangeNotifier {
   MockRadioSpace? _mockSpace;
   Timer? _statusTimer;
 
+  GatewayClient? _gateway;
+
   MeshEngine? get engine => _engine;
   bool get isRunning => _engine != null;
+
+  /// Null until a backend is configured. The UI reads this to know whether
+  /// syncing is possible at all, rather than offering an action that cannot
+  /// work.
+  GatewayClient? get gateway => _gateway;
+  bool get hasBackend => apiBase.isNotEmpty;
 
   MeshStatus _status = MeshStatus.empty;
   MeshStatus get status => _status;
@@ -148,6 +175,20 @@ class MeshController extends ChangeNotifier {
     _engine = engine;
     await engine.start();
 
+    // The gateway client exists only if there is somewhere to sync to. The
+    // media uploader rides along with it: photos and voice clips spend
+    // whatever the reports leave of a connectivity window.
+    if (hasBackend) {
+      _gateway = GatewayClient(
+        engine: engine,
+        backend: HttpSyncBackend(baseUrl: apiBase, apiKey: apiKey),
+        bus: bus,
+        uploader: MediaUploader(
+          backend: HttpMediaBackend(baseUrl: apiBase, apiKey: apiKey),
+        ),
+      );
+    }
+
     // Anything unacknowledged from a previous run goes back into the mesh.
     await _restoreUnacknowledged(engine);
 
@@ -178,6 +219,27 @@ class MeshController extends ChangeNotifier {
       backgroundRelayActive = false;
     }
     if (!_disposed) notifyListeners();
+  }
+
+  /// Spend a connectivity window, if there is a backend to spend it on.
+  ///
+  /// Returns null when no backend is configured — the caller should not be
+  /// offering a sync action in that case, and a null says so rather than
+  /// pretending an empty sync succeeded.
+  Future<SyncResult?> syncNow({double windowSeconds = 18}) async {
+    final gateway = _gateway;
+    if (gateway == null) return null;
+
+    final result = await gateway.sync(windowSeconds: windowSeconds);
+
+    // Anything the backend acknowledged is settled: mark it locally so a
+    // restart does not re-offer it.
+    for (final reportId in result.acceptedReportIds) {
+      await database.markAcknowledged(reportId, DateTime.now().toUtc());
+    }
+    _internetOnline = result.ok;
+    if (!_disposed) notifyListeners();
+    return result;
   }
 
   /// Re-offer reports that were never acknowledged before the app died.
