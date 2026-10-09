@@ -19,3 +19,12 @@ simulator/out/
 
 # OS
 .DS_Store
+
+# Gradle build output
+mobile/android/build/
+mobile/android/app/build/
+
+# Backend
+backend/.venv/
+backend/.env
+backend/out/

@@ -129,3 +129,54 @@ def test_duplicate_copies_of_one_report_cost_one_slot():
               if p.payload.get("report_id") == packet.payload["report_id"]]
     assert len(unique) == 1, "the window must be spent once per report"
     assert len(copies) >= len(unique)
+
+
+def test_truncated_topology_still_carries_links():
+    """A node list with no links tells the backend nothing about reachability.
+
+    Under a tight window the topology gets truncated. If that truncation drops
+    links, every node arrives looking isolated, every responder looks
+    unreachable, and the network-aware recommendation quietly stops working —
+    with no error anywhere to show for it.
+    """
+    cfg = WorldConfig(seed=7, area_m=500.0,
+                      radio=RadioModel(range_m=300.0, base_loss=0.0,
+                                       edge_loss=0.0))
+    world = World(cfg)
+    world.add_node("gw-01", role=NodeRole.GATEWAY, x=0, y=0, battery=1.0)
+    for i in range(30):
+        world.add_node(f"node-{i:02d}", role=NodeRole.SURVIVOR, battery=0.9)
+    world.run_for(12)
+
+    # Traffic, so there is something to sync at all.
+    for i in range(5):
+        world.nodes[f"node-{i:02d}"].engine.send_sos(note="trapped")
+    world.run_for(15)
+
+    backend = InMemoryBackend()
+    world.set_internet("gw-01", True, 20)
+    client = GatewayClient(world, "gw-01", backend)
+
+    # A window far too small to carry the full topology alongside the reports.
+    client.sync(2.0)
+
+    assert backend.syncs, "the sync should have been attempted"
+    body = backend.syncs[-1]
+
+    if body.get("topology_truncated"):
+        assert body["nodes"], "truncation should still send some nodes"
+        node_ids = {n["node_id"] for n in body["nodes"]}
+        # Links may be empty only if no kept pair is actually connected.
+        for link in body["links"]:
+            assert link["a"] in node_ids and link["b"] in node_ids, (
+                "a link to a node we did not send cannot be reasoned about"
+            )
+        connected_pairs_exist = any(
+            l["a"] in node_ids and l["b"] in node_ids
+            for l in world.world_snapshot()["links"]
+        )
+        if connected_pairs_exist:
+            assert body["links"], (
+                "nodes were sent without any links between them — the "
+                "backend would see them as isolated"
+            )

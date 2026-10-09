@@ -1,0 +1,15 @@
+# Core — everything the backend needs to run with no credentials at all.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+python-multipart>=0.0.9
+
+# Optional upgrades. Install these only if you have the credentials:
+#   GEMINI_API_KEY      → google-genai        (real Gemini reasoning)
+#   FIRESTORE_PROJECT   → google-cloud-firestore (persistence)
+# google-genai>=1.0
+# google-cloud-firestore>=2.16
+
+# Development
+pytest>=8.0
+httpx>=0.27

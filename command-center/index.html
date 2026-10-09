@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avertis Command Centre</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="mark"></span>
+    <h1>AVERTIS</h1>
+    <span class="sub">Command Centre</span>
+  </div>
+  <div class="header-state">
+    <span id="engine-badge" class="badge badge-muted">connecting…</span>
+    <span id="link-badge" class="badge badge-muted">backend ?</span>
+  </div>
+</header>
+
+<!-- Plan §29: the dashboard must not be only a map. The decision panel is
+     the differentiator, so it sits at the top. -->
+<main>
+
+  <section id="decision-panel" class="panel">
+    <h2>Operational decision</h2>
+    <div id="decision-empty" class="empty">
+      No incidents yet. Waiting for a gateway sync.
+    </div>
+    <div id="decision" hidden>
+      <div class="decision-head">
+        <div>
+          <span id="decision-id" class="incident-id"></span>
+          <span id="decision-severity" class="pill"></span>
+        </div>
+        <span id="decision-sources" class="muted"></span>
+      </div>
+      <p id="decision-desc" class="desc"></p>
+
+      <div class="decision-grid">
+        <div class="metric">
+          <span class="label">Recommended responder</span>
+          <span id="decision-responder" class="value strong">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Network reachability</span>
+          <span id="decision-reach" class="value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Distance</span>
+          <span id="decision-distance" class="value">—</span>
+        </div>
+        <div class="metric">
+          <span class="label">Hazard exposure</span>
+          <span id="decision-hazard" class="value">—</span>
+        </div>
+      </div>
+
+      <button id="why-button" class="why">WHY?</button>
+      <div id="why-text" class="why-text" hidden></div>
+
+      <div id="decision-flags" class="flags"></div>
+      <div id="decision-alternatives" class="alternatives"></div>
+    </div>
+  </section>
+
+  <div class="columns">
+
+    <section class="panel">
+      <h2>Network</h2>
+      <div class="stat-row">
+        <div class="stat"><span id="net-nodes" class="n">0</span><span class="t">nodes</span></div>
+        <div class="stat"><span id="net-reachable" class="n">0</span><span class="t">reachable</span></div>
+        <div class="stat"><span id="net-partitions" class="n">0</span><span class="t">partitions</span></div>
+        <div class="stat"><span id="net-gateways" class="n">0</span><span class="t">gateways</span></div>
+      </div>
+      <!-- Topology, drawn from reported links. Nodes are coloured by
+           partition, because "who can talk to whom" is the thing an operator
+           needs to see at a glance. -->
+      <canvas id="topology" width="560" height="320"></canvas>
+      <p class="muted small" id="topology-note">No topology reported yet.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Incidents</h2>
+      <div class="stat-row">
+        <div class="stat crit"><span id="inc-crit" class="n">0</span><span class="t">life critical</span></div>
+        <div class="stat emer"><span id="inc-emer" class="n">0</span><span class="t">emergency</span></div>
+        <div class="stat oper"><span id="inc-oper" class="n">0</span><span class="t">operational</span></div>
+        <div class="stat"><span id="inc-norm" class="n">0</span><span class="t">normal</span></div>
+      </div>
+      <p class="muted small" id="fusion-note"></p>
+      <ul id="incident-list" class="incident-list"></ul>
+    </section>
+
+  </div>
+
+  <section class="panel">
+    <h2>AI activity</h2>
+    <p class="muted small" id="activity-note"></p>
+    <ul id="activity-feed" class="activity"></ul>
+  </section>
+
+</main>
+
+<footer>
+  <span id="footer-note" class="muted small"></span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

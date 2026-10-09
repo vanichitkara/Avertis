@@ -227,23 +227,45 @@ class GatewayClient:
             body["links"] = snapshot["links"]
             used += len(nodes_json) + len(links_json)
         else:
-            # Send the nodes that matter most to a response decision: the ones
-            # that are unreachable or carrying a backlog.
+            # Truncate, but never send nodes without the links between them.
+            #
+            # A node list with no links is worse than useless to the backend:
+            # every node looks isolated, so every responder looks unreachable
+            # and the network-aware recommendation silently stops working.
+            # Links are what carry reachability, so half the remaining budget
+            # is reserved for them before any node is chosen.
             def priority_of(n: dict[str, Any]) -> tuple[int, int]:
                 return (0 if not n.get("reachable") else 1,
                         -int(n.get("queue_depth", 0)))
 
+            node_budget = topology_budget // 2
             kept: list[dict[str, Any]] = []
             spent = 0
             for node_snapshot in sorted(snapshot["nodes"], key=priority_of):
                 size = len(json.dumps(node_snapshot).encode())
-                if spent + size > topology_budget:
+                if spent + size > node_budget:
                     break
                 kept.append(node_snapshot)
                 spent += size
+
+            # Only links whose endpoints both survived are meaningful; a link
+            # to a node we did not send cannot be reasoned about.
+            kept_ids = {n["node_id"] for n in kept}
+            kept_links: list[dict[str, Any]] = []
+            for link in snapshot["links"]:
+                if link["a"] not in kept_ids or link["b"] not in kept_ids:
+                    continue
+                size = len(json.dumps(link).encode())
+                if spent + size > topology_budget:
+                    break
+                kept_links.append(link)
+                spent += size
+
             body["nodes"] = kept
+            body["links"] = kept_links
             body["topology_truncated"] = True
             body["topology_total_nodes"] = len(snapshot["nodes"])
+            body["topology_total_links"] = len(snapshot["links"])
             used += spent
 
         self.bus.emit(
