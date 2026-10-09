@@ -16,11 +16,13 @@ three `export` lines out of `tool/env.sh`.
 
 ```bash
 source tool/env.sh
-(cd mobile && flutter test) && (cd simulator && .venv/bin/python -m pytest -q)
+(cd mobile && flutter test) \
+  && (cd simulator && .venv/bin/python -m pytest -q) \
+  && (cd backend && .venv/bin/python -m pytest -q)
 ```
 
-Expect **91 Dart tests** and **51 Python tests**, all passing, in about five
-seconds. If either fails, stop — everything below assumes these pass.
+Expect **91 Dart**, **52 simulator** and **59 backend** tests, all passing, in
+about ten seconds. If any fail, stop — everything below assumes these pass.
 
 ---
 
@@ -68,8 +70,10 @@ contract, so the sync path is testable before the real backend exists:
 ```bash
 .venv/bin/python -m avertis_sim.mock_gateway_server        # terminal 1
 .venv/bin/python -m avertis_sim run gateway_recovery \
-    --gateway http://127.0.0.1:8787                        # terminal 2
+    --api http://127.0.0.1:8787                            # terminal 2
 ```
+
+The flag is `--api`, not `--gateway`.
 
 The mock server also implements `POST /api/v1/media/upload`, so the mobile
 upload path is testable before the backend exists:
@@ -80,8 +84,65 @@ curl -X POST http://127.0.0.1:8787/api/v1/media/upload \
 curl http://127.0.0.1:8787/api/v1/debug/state    # media count should rise
 ```
 
-When your teammate's backend is up, point `--gateway` at it instead. If the
-contract in `docs/api.md` holds, nothing else changes.
+---
+
+## 2b. The whole system together
+
+Three terminals. This is the demo.
+
+```bash
+# 1 — backend
+cd backend && .venv/bin/python -m uvicorn avertis_backend.main:app --port 8000
+
+# 2 — command centre
+cd command-center && python3 -m http.server 8080
+
+# 3 — drive it with the simulator
+cd simulator
+.venv/bin/python -m avertis_sim run relay_failure --api http://127.0.0.1:8000
+.venv/bin/python -m avertis_sim run mass_incident --api http://127.0.0.1:8000
+```
+
+Open <http://127.0.0.1:8080/index.html?api=http://127.0.0.1:8000>.
+
+What to look at, in order:
+
+1. **The header badge.** It says `reasoning: rules (no Gemini key)` until a
+   key is set. Nothing on the page is ever labelled as model output when it
+   is not — check this before quoting anything to a judge.
+2. **The operational decision panel** (plan §29). Recommended responder,
+   reachability, distance, hazard, and a WHY button whose text is generated
+   from the figures beside it.
+3. **The topology.** Nodes are placed by real GPS and coloured by partition,
+   so a split network is visible as separate colours that no link crosses.
+4. **Fusion.** The incident panel reports how many duplicate reports were
+   absorbed. A mass-incident run typically turns ~166 reports into ~60
+   incidents.
+5. **The AI activity feed**, which is where `RESPONSE_REPLANNED` appears when
+   a topology change moves a recommendation.
+
+To see the signature moment on its own:
+
+```bash
+.venv/bin/python -m avertis_sim run response_adaptation --api http://127.0.0.1:8000
+```
+
+### Turning Gemini on
+
+```bash
+cd backend && .venv/bin/pip install google-genai
+GEMINI_API_KEY=... .venv/bin/python -m uvicorn avertis_backend.main:app --port 8000
+```
+
+The header badge turns green and reads `reasoning: gemini:…`. If it does not,
+the key did not work and the backend fell back to rules — which it will also
+say in its log rather than pretending.
+
+Note that the *responder choice* is deterministic either way, on purpose. A
+model picking rescuers would not give the same answer twice for the same
+state, and the signature demo depends on the change being caused by the
+network rather than by the model's mood. Gemini explains the decision and
+does the language work: structuring, fusion, and the WHY text.
 
 ### Pointing the app at a backend
 

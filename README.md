@@ -113,7 +113,7 @@ cd mobile && flutter test
 - Seven scenarios, resilience benchmark, replay system
 - Mock gateway API server — a reference implementation of the contract for
   the backend workstream, plus HTTP integration tests against it
-- 51 Python tests, 91 Dart tests, Android APK builds and runs
+- 59 backend, 52 simulator and 91 mobile tests, Android APK builds and runs
 
 **Not done**
 
