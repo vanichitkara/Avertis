@@ -30,6 +30,7 @@ field report into structured fields.
 Rules:
 - Use ONLY what the report states. Never invent details.
 - people_affected must be null unless the report gives a countable number.
+- if "people stated by sender" below is not null, use exactly that figure: the person told us directly and that outranks anything inferred from wording.
 - confidence in [0,1] reflects how much the report actually supports the \
 structure, not how serious it sounds.
 - severity is one of LIFE_CRITICAL, EMERGENCY, OPERATIONAL, NORMAL, and must \
@@ -41,6 +42,7 @@ Report:
   priority as sent: {priority}
   kind: {kind}
   has location: {has_location}
+  people stated by sender: {people_count}
   text: {text}
 
 Reply with JSON only:
@@ -138,6 +140,7 @@ class GeminiReasoner(Reasoner):
             priority=report.priority.value,
             kind=report.kind,
             has_location=report.location is not None,
+            people_count=report.people_count,
             text=text[:2000],
         ))
         if raw is None:

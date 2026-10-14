@@ -160,11 +160,19 @@ class DeterministicReasoner(Reasoner):
             # An SOS with no words is still a real emergency — the button was
             # pressed. It just cannot be described.
             if report.kind == "SOS":
+                stated = report.people_count
                 return {
                     "type": IncidentType.UNKNOWN,
                     "severity": Priority.LIFE_CRITICAL,
-                    "description": "SOS with no description.",
-                    "confidence": 0.3,
+                    "people_affected": stated,
+                    "description": (
+                        f"SOS: {stated} person(s) need help, no description."
+                        if stated is not None
+                        else "SOS with no description."
+                    ),
+                    # Being told a headcount is real evidence, even with no
+                    # words around it.
+                    "confidence": 0.45 if stated is not None else 0.3,
                 }
             return {"confidence": 0.1}
 
@@ -173,10 +181,15 @@ class DeterministicReasoner(Reasoner):
         if report.kind == "SOS" and severity.rank > Priority.LIFE_CRITICAL.rank:
             severity = Priority.LIFE_CRITICAL
 
+        # What the person stated beats what we guessed from their wording.
+        people = report.people_count
+        if people is None:
+            people = extract_people_count(text)
+
         return {
             "type": incident_type,
             "severity": severity,
-            "people_affected": extract_people_count(text),
+            "people_affected": people,
             "description": text,
             "confidence": self._confidence(report, incident_type, text),
         }
@@ -198,7 +211,7 @@ class DeterministicReasoner(Reasoner):
             score += 0.1            # more than a fragment
         if report.media:
             score += 0.1            # there is an attachment
-        if extract_people_count(text) is not None:
+        if report.people_count is not None or extract_people_count(text):
             score += 0.1            # a countable detail
         if report.hop_count <= 3:
             score += 0.1            # arrived with less opportunity for loss

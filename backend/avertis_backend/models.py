@@ -109,6 +109,12 @@ class RawReport(BaseModel):
     location: GeoPoint | None = None
     text: str | None = None
     transcript: str | None = None
+
+    # Stated outright by the person who sent it (docs/protocol.md §5), as
+    # opposed to anything inferred from their words. Nothing is more reliable
+    # than being told, so this outranks text extraction.
+    people_count: int | None = None
+
     media: list[MediaDescriptor] = Field(default_factory=list)
     hop_count: int = 0
     path: list[str] = Field(default_factory=list)

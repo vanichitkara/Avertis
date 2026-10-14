@@ -333,7 +333,10 @@ class _SyncCardState extends State<_SyncCard> {
 
   @override
   Widget build(BuildContext context) {
-    final held = widget.controller.engine?.state.pendingReports.length ?? 0;
+    // Count what a sync would actually carry — reports held for others *and*
+    // this node's own unacknowledged ones — rather than saying "nothing
+    // waiting" while an unsent SOS sits on the device.
+    final held = widget.controller.gateway?.heldReports().length ?? 0;
 
     return Card(
       child: Padding(

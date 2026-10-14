@@ -247,3 +247,55 @@ def test_sync_order_is_critical_first_then_oldest(agent):
 
     ordered = IncidentAgent.sync_order(agent.store.list_incidents())
     assert ordered[0].severity == Priority.LIFE_CRITICAL
+
+
+class TestStatedHeadcount:
+    """A count the sender gave us outright must never be thrown away.
+
+    The SOS screen asks "how many people need help?" and the protocol carries
+    the answer (§5). Losing it means dispatching for an unknown number when we
+    were told the number — the opposite failure to inventing one, and just as
+    consequential.
+    """
+
+    def test_a_wordless_sos_keeps_its_stated_count(self, agent):
+        incident, _ = agent.ingest(RawReport(
+            report_id="rpt-sos",
+            origin_node="node-09",
+            created_at=T0,
+            kind="SOS",
+            priority=Priority.LIFE_CRITICAL,
+            location=BRIDGE,
+            people_count=3,
+        ))
+        assert incident.people_affected == 3
+
+    def test_a_stated_count_beats_one_inferred_from_wording(self, agent):
+        incident, _ = agent.ingest(RawReport(
+            report_id="rpt-1",
+            origin_node="node-01",
+            created_at=T0,
+            kind="SOS",
+            location=BRIDGE,
+            text="a family is trapped on the roof",   # would infer 1
+            people_count=5,                            # but they told us 5
+        ))
+        assert incident.people_affected == 5
+
+    def test_no_stated_count_still_falls_back_to_the_text(self, agent):
+        incident, _ = agent.ingest(
+            report("rpt-2", "three people trapped near the bridge")
+        )
+        assert incident.people_affected == 3
+
+    def test_being_told_a_count_raises_confidence(self, agent):
+        without, _ = agent.ingest(RawReport(
+            report_id="rpt-a", origin_node="n1", created_at=T0,
+            kind="SOS", priority=Priority.LIFE_CRITICAL, location=BRIDGE,
+        ))
+        with_count, _ = agent.ingest(RawReport(
+            report_id="rpt-b", origin_node="n2", created_at=T0,
+            kind="SOS", priority=Priority.LIFE_CRITICAL, location=FAR,
+            people_count=4,
+        ))
+        assert with_count.confidence > without.confidence

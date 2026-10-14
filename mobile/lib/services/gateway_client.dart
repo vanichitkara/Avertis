@@ -106,20 +106,41 @@ class GatewayClient {
 
   final Set<String> _syncedReportIds = {};
 
-  /// Reports the gateway holds, one copy per report.
+  /// Everything this node still needs to get to the backend.
   ///
-  /// Custody retransmissions mean the same report can arrive several times by
+  /// Two sources, and both matter:
+  ///
+  ///  * `pendingReports` — other people's reports this node is holding as a
+  ///    gateway, waiting for a window.
+  ///  * `custody` — this node's *own* reports that have not been
+  ///    acknowledged by anyone yet.
+  ///
+  /// The second is easy to forget, and omitting it has a bad failure mode: a
+  /// survivor whose phone still has internet could not upload their own SOS,
+  /// because only gateway nodes populate `pendingReports`. Their report would
+  /// sit on the device waiting for a mesh peer that may never appear, while
+  /// the screen showed nothing waiting to send.
+  ///
+  /// Custody retransmission means the same report can appear several times by
   /// different routes. Each copy is a legitimate packet, but they are one
   /// report — sending all of them would spend a scarce window on duplicates.
   List<Packet> heldReports() {
     final unique = <String, Packet>{};
-    for (final packet in engine.state.pendingReports) {
+
+    void offer(Packet packet) {
       final reportId = packet.payload['report_id'] as String?;
-      if (reportId == null || _syncedReportIds.contains(reportId)) continue;
+      if (reportId == null || _syncedReportIds.contains(reportId)) return;
       final existing = unique[reportId];
       if (existing == null || packet.createdAt.isBefore(existing.createdAt)) {
         unique[reportId] = packet;
       }
+    }
+
+    for (final packet in engine.state.pendingReports) {
+      offer(packet);
+    }
+    for (final entry in engine.state.custody.values) {
+      offer(entry.packet);
     }
     return unique.values.toList();
   }
@@ -147,6 +168,10 @@ class GatewayClient {
       'location': p['location'],
       'text': p['text'] ?? p['note'],
       'transcript': p['transcript'],
+      // Stated outright on the SOS screen. The backend will not infer a
+      // headcount it was not given, so dropping this here means dispatching
+      // for an unknown number of people when the person told us the number.
+      'people_count': p['people_count'],
       // Device-local paths are stripped: they mean nothing off this handset
       // and are not part of the frozen descriptor (docs/protocol.md §5).
       'media': wireMediaDescriptors(p['media']),
@@ -254,10 +279,16 @@ class GatewayClient {
     final incidentIds =
         incidents.map((i) => i['incident_id'] as String).toList();
 
-    // Anything acknowledged is no longer this node's problem.
+    // Anything acknowledged is no longer this node's problem — neither as a
+    // gateway holding it for someone else, nor as the node that wrote it.
+    // Leaving it in custody would keep retransmitting a report the backend
+    // already has.
     engine.state.pendingReports.removeWhere(
       (p) => accepted.contains(p.payload['report_id']),
     );
+    for (final reportId in accepted) {
+      engine.state.custody.remove(reportId);
+    }
 
     // Only now, with the reports safely acknowledged, spend what is left of
     // the window on the bytes. A photo is evidence; a report is a person.
