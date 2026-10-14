@@ -10,9 +10,45 @@ from __future__ import annotations
 
 import logging
 import os
+import pathlib
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
+
+#: Credentials live in backend/.env, which is gitignored. Keys must never be
+#: committed: this repository is going to be shared, and a key in git history
+#: stays there even after it is deleted.
+ENV_FILE = pathlib.Path(__file__).resolve().parent.parent / ".env"
+
+
+def _load_env_file() -> None:
+    """Read backend/.env into the environment, if it exists.
+
+    Real environment variables win, so a key exported in the shell or set by
+    Cloud Run overrides the file rather than being silently replaced by it.
+    """
+    if not ENV_FILE.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(ENV_FILE, override=False)
+        log.info("loaded settings from %s", ENV_FILE)
+        return
+    except ImportError:
+        pass
+
+    # python-dotenv is optional; a tiny parser keeps .env working without it.
+    for raw in ENV_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    log.info("loaded settings from %s", ENV_FILE)
 
 
 @dataclass(frozen=True)
@@ -34,6 +70,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    _load_env_file()
     return Settings(
         api_key=os.environ.get("AVERTIS_API_KEY", ""),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "")

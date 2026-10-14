@@ -30,17 +30,37 @@ explains the decision; it does not make it.
 Everything carries `reasoned_by`, and the command centre shows which engine
 produced what. Rule output is never presented as model output.
 
-To switch Gemini on:
+## Turning Gemini on
+
+Two steps, and **both** are required — the key alone does nothing.
 
 ```bash
-pip install google-genai
-GEMINI_API_KEY=... .venv/bin/python -m uvicorn avertis_backend.main:app --port 8000
+cd backend
+cp .env.example .env            # then put your key in GEMINI_API_KEY=
+.venv/bin/pip install google-genai
 ```
+
+Get a key from <https://aistudio.google.com/apikey>.
+
+`backend/.env` is gitignored. Never commit a real key: this repository is
+shared, and a key committed once remains in the git history even after it is
+deleted from the file.
+
+Restart the backend and check it took:
+
+```bash
+curl -s localhost:8000/api/v1/health | python3 -m json.tool
+```
+
+`reasoning.is_model` must be `true`. If it is `false`, `reasoning.note` says
+which of the two steps is missing — the command centre header shows the same
+thing, and neither will claim Gemini is running when it is not.
 
 ## Persistence
 
-In-memory by default — state is lost on restart. Set `FIRESTORE_PROJECT` and
-install `google-cloud-firestore` to persist.
+In-memory by default — state is lost on restart. To persist, set
+`FIRESTORE_PROJECT` in `backend/.env`, install `google-cloud-firestore`, and
+run `gcloud auth application-default login`.
 
 ## Deploy
 
