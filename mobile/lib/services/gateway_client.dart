@@ -237,7 +237,14 @@ class GatewayClient {
       'budget_bytes': budget,
     }));
 
-    if (batch.isEmpty) {
+    // Note what is not checked here: whether there are reports to send.
+    //
+    // Network state is payload in its own right. A relay dying produces no
+    // new report, yet it is precisely the event that should change which
+    // responder is dispatched. Skipping the sync on an empty report queue
+    // would mean the backend never learns the topology changed and the
+    // recommendation never moves.
+    if (batch.isEmpty && (body['nodes'] as List).isEmpty) {
       bus.emit(MeshEvent(MeshEventType.syncCompleted, engine.nodeId, {
         'accepted': 0,
         'deferred': ordered.length,

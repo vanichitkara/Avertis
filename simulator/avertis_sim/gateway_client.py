@@ -276,12 +276,23 @@ class GatewayClient:
                    "budget_bytes": budget_bytes})
         )
 
-        if not batch:
+        if not batch and not body.get("nodes"):
+            # Nothing at all to say.
             self.bus.emit(
                 Event("SYNC_COMPLETED", self.world.now(), self.gateway_id,
                       {"accepted": 0, "deferred": len(ordered)})
             )
             return SyncResult(0, 0, len(ordered), used)
+
+        # Note what is NOT checked above: whether there are any reports.
+        #
+        # Network state is payload in its own right, not packaging for the
+        # reports. A relay dying produces no new report, but it is exactly
+        # the event that should change which responder is sent — so skipping
+        # the sync when the report queue is empty would mean the backend
+        # never learns the topology changed, and the recommendation never
+        # moves. That is the whole thesis of the project, lost to an
+        # optimisation.
 
         try:
             response = self.backend.post_sync(body)

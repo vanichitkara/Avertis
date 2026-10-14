@@ -213,9 +213,23 @@ class ResponseAdaptationScenario(Scenario):
         baseline_before = self.recommend("node-inc", "INC-142",
                                          DistanceOnlySelector())
 
+        # Sync the healthy state before breaking anything.
+        #
+        # The recommendations above are the simulator's own. The backend —
+        # and therefore the command centre — only ever sees what a gateway
+        # window delivers, so syncing once at the end would show an operator
+        # a single final answer and none of the change. The whole point of
+        # §7 is watching the recommendation move, so each state gets its own
+        # window.
+        self.open_gateway_window("gw-01", 20)
+
         self.recorder.mark(world, "RELAY R7 FAILED")
         world.kill_node("R7", reason="RELAY_FAILURE")
         world.run_for(25)
+
+        # The topology has changed. Hand the new one to the backend: this is
+        # the sync that makes the recommendation move on screen.
+        self.open_gateway_window("gw-01", 20)
 
         after = self.recommend("node-inc", "INC-142")
         baseline_after = self.recommend("node-inc", "INC-142",
@@ -241,6 +255,8 @@ class ResponseAdaptationScenario(Scenario):
         world.revive_node("R7", battery=0.95)
         world.run_for(30)
         restored = self.recommend("node-inc", "INC-142")
+        # And the recovery, so the loop closes on screen too.
+        self.open_gateway_window("gw-01", 20)
         self.findings.append(
             f"after R7 recovered, recommendation returned to "
             f"{restored.chosen.responder_id}"

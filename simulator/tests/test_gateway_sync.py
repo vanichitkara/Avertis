@@ -180,3 +180,36 @@ def test_truncated_topology_still_carries_links():
                 "nodes were sent without any links between them — the "
                 "backend would see them as isolated"
             )
+
+
+def test_a_topology_change_syncs_even_with_no_new_reports():
+    """The network is half the world model, and it changes on its own.
+
+    A relay failing generates no report. If the gateway only talks to the
+    backend when it has reports to send, the backend never learns the
+    topology changed and the recommended responder never moves — which is
+    the one behaviour the whole project exists to demonstrate.
+    """
+    w = small_world()
+    w.nodes["node-00"].engine.send_sos(note="trapped")
+    w.run_for(15)
+
+    backend = InMemoryBackend()
+    w.set_internet("gw-01", True, 20)
+    client = GatewayClient(w, "gw-01", backend)
+
+    first = client.sync(20)
+    assert first.accepted >= 1
+    assert len(backend.syncs) == 1
+
+    # Nothing new to report, but the mesh has changed shape.
+    w.kill_node("node-01", reason="RELAY_FAILURE")
+    w.run_for(20)
+    w.set_internet("gw-01", True, 20)
+    second = client.sync(20)
+
+    assert second.accepted == 0, "there were no new reports"
+    assert len(backend.syncs) == 2, (
+        "the topology change must still reach the backend"
+    )
+    assert backend.syncs[-1]["nodes"], "the second sync carried node state"

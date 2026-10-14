@@ -199,11 +199,16 @@ void main() {
           reason: 'a scarce window must carry life-critical traffic first');
     });
 
-    test('nothing is claimed as sent when there is nothing to send', () async {
+    test('a topology-only sync still reaches the backend', () async {
+      // No reports, but this node's view of the mesh is worth sending: a
+      // relay failing changes which responder should go, and produces no
+      // report of its own.
       final result = await client.sync(windowSeconds: 18);
-      expect(result.attempted, 0);
+
       expect(result.accepted, 0);
-      expect(backend.bodies, isEmpty);
+      expect(backend.bodies, hasLength(1),
+          reason: 'network state is payload, not packaging');
+      expect(backend.bodies.single['nodes'], isNotEmpty);
     });
 
     test('duplicate copies of one report cost one slot', () async {
@@ -226,8 +231,13 @@ void main() {
       await client.sync(windowSeconds: 18);
 
       final second = await client.sync(windowSeconds: 18);
+
+      // The second window still talks to the backend — topology is worth
+      // sending on its own — but it must not re-send a report the backend
+      // has already acknowledged.
       expect(second.accepted, 0);
-      expect(backend.bodies.length, 1, reason: 'nothing left to send');
+      expect(backend.bodies.last['incidents'], isEmpty,
+          reason: 'an acknowledged report must not be sent twice');
     });
   });
 
