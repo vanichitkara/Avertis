@@ -113,7 +113,7 @@ cd mobile && flutter test
 - Seven scenarios, resilience benchmark, replay system
 - Mock gateway API server — a reference implementation of the contract for
   the backend workstream, plus HTTP integration tests against it
-- 59 backend, 52 simulator and 91 mobile tests, Android APK builds and runs
+- 106 backend, 53 simulator and 109 mobile tests, Android APK builds and runs
 
 **Not done**
 
@@ -122,5 +122,7 @@ cd mobile && flutter test
   packet. Emulators have no BLE, so this cannot be closed without hardware —
   it is the one gap that only handsets can close.
 - Everything on my teammate's side, and the integration against it
+Before submitting, work through `docs/pre-submission-checklist.md`.
+
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`
 for measured results, including the ones that are unflattering.
