@@ -79,15 +79,30 @@ def health() -> dict:
         "reasoning": {
             "engine": reasoner.name,
             "is_model": reasoner.is_model,
-            "note": (
-                "Gemini is configured and in use."
-                if reasoner.is_model
-                else "No GEMINI_API_KEY — reasoning with deterministic rules. "
-                     "Incidents and recommendations are labelled accordingly."
-            ),
+            # Say which of the three situations this actually is. "No key" is
+            # the wrong message when a key was supplied and something else
+            # stopped it working — that sends someone hunting for a missing
+            # key they already set.
+            "note": _reasoning_note(),
         },
         "store": store.name,
     }
+
+
+def _reasoning_note() -> str:
+    if reasoner.is_model:
+        return "Gemini is configured and in use."
+    if settings.gemini_configured:
+        return (
+            "GEMINI_API_KEY is set but Gemini did not start — most often "
+            "because google-genai is not installed (pip install google-genai). "
+            "Reasoning fell back to deterministic rules; see the server log "
+            "for the exact reason."
+        )
+    return (
+        "No GEMINI_API_KEY — reasoning with deterministic rules. Incidents "
+        "and recommendations are labelled accordingly."
+    )
 
 
 # -- gateway -----------------------------------------------------------------

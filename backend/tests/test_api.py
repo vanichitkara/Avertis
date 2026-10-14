@@ -204,3 +204,47 @@ class TestIncidentsAndWorld:
 
     def test_an_unknown_incident_is_a_404(self, client):
         assert client.get("/api/v1/incidents/INC-nope").status_code == 404
+
+
+class TestReasoningDisclosure:
+    """The badge an operator reads must describe the real situation.
+
+    Three states, three messages: no key, key-but-broken, and working. Saying
+    "no key" when a key is set sends someone hunting for something they
+    already did.
+    """
+
+    def test_no_key_says_no_key(self, client, monkeypatch):
+        import dataclasses
+
+        from avertis_backend import main
+
+        # Settings is frozen, so swap the whole object.
+        monkeypatch.setattr(
+            main, "settings",
+            dataclasses.replace(main.settings, gemini_api_key=""),
+        )
+        note = client.get("/api/v1/health").json()["reasoning"]["note"]
+        assert "No GEMINI_API_KEY" in note
+
+    def test_a_set_but_broken_key_says_so(self, client, monkeypatch):
+        import dataclasses
+
+        from avertis_backend import main
+
+        # A key is present, yet the live engine is the rule-based one — which
+        # is exactly what happens when google-genai is not installed.
+        monkeypatch.setattr(
+            main, "settings",
+            dataclasses.replace(main.settings, gemini_api_key="abc"),
+        )
+        body = client.get("/api/v1/health").json()
+        assert body["reasoning"]["is_model"] is False
+        note = body["reasoning"]["note"]
+        assert "is set but" in note
+        assert "google-genai" in note
+
+    def test_is_model_is_never_true_without_a_model(self, client):
+        body = client.get("/api/v1/health").json()
+        if body["reasoning"]["engine"] == "deterministic":
+            assert body["reasoning"]["is_model"] is False
