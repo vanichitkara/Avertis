@@ -55,7 +55,7 @@ def _load_env_file() -> None:
 class Settings:
     api_key: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     firestore_project: str = ""
     storage_bucket: str = ""
     media_dir: str = "out/media"
@@ -75,7 +75,7 @@ def load_settings() -> Settings:
         api_key=os.environ.get("AVERTIS_API_KEY", ""),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", "")
         or os.environ.get("GOOGLE_API_KEY", ""),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
         firestore_project=os.environ.get("FIRESTORE_PROJECT", ""),
         storage_bucket=os.environ.get("STORAGE_BUCKET", ""),
         media_dir=os.environ.get("AVERTIS_MEDIA_DIR", "out/media"),

@@ -145,7 +145,10 @@ class NetworkView:
             "nodes_reachable": self.reachable_count(),
             "partitions": self.partition_count,
             "gateways": self.gateways,
-            "links": len(self.links),
+            # Named link_count, not links: /api/v1/world puts the actual
+            # link list under "links", and two endpoints using one key for
+            # an int and a list is a trap for anyone consuming both.
+            "link_count": len(self.links),
             "mean_link_stability": round(
                 sum(link.stability for link in self.links) / len(self.links), 3
             ) if self.links else 0.0,

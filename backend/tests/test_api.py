@@ -233,7 +233,9 @@ class TestReasoningDisclosure:
         from avertis_backend import main
 
         # A key is present, yet the live engine is the rule-based one — which
-        # is exactly what happens when google-genai is not installed.
+        # is exactly what happens when google-genai is missing, the model is
+        # retired, or the key is rejected. conftest guarantees the test suite
+        # is in that state.
         monkeypatch.setattr(
             main, "settings",
             dataclasses.replace(main.settings, gemini_api_key="abc"),

@@ -23,6 +23,26 @@ from .deterministic import DeterministicReasoner
 
 log = logging.getLogger(__name__)
 
+#: How long a single model call may take before it is abandoned.
+#:
+#: A gateway sync happens inside a connectivity window measured in seconds.
+#: Without a cap the SDK will sit on a 503 and retry internally for minutes —
+#: observed doing exactly that against a busy model — and the whole incident
+#: pipeline blocks behind it. Degrading to rules in eight seconds is strictly
+#: better than structuring a report perfectly three minutes after the window
+#: shut.
+# The API rejects anything under 10s with INVALID_ARGUMENT, so this is the
+# minimum plus a little margin.
+REQUEST_TIMEOUT_MS = 12000
+
+#: gemini-2.5-flash is retired for new API keys — it is still listed by
+#: models.list() but returns 404 on use, which is a confusing way to fail.
+DEFAULT_MODEL = "gemini-3.8-flash"
+
+#: No single report justifies certainty, whoever is doing the reasoning.
+#: Matches the ceiling the deterministic path applies.
+MAX_CONFIDENCE = 0.95
+
 _STRUCTURE_PROMPT = """\
 You are the Incident Agent of a disaster-response system. Convert one raw \
 field report into structured fields.
@@ -89,10 +109,14 @@ class GeminiReasoner(Reasoner):
     name = "gemini"
     is_model = True
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL) -> None:
         from google import genai  # imported lazily: optional dependency
+        from google.genai import types
 
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
+        )
         self._model = model
         self.name = f"gemini:{model}"
         self._fallback = DeterministicReasoner()
@@ -163,9 +187,22 @@ class GeminiReasoner(Reasoner):
         if isinstance(raw.get("severity"), str):
             try:
                 proposed = Priority(raw["severity"])
-                # The reporter's own priority stays a floor, as in the rules.
-                if proposed.rank <= report.priority.rank:
+                # Severity may only ever be raised. Three judges disagree
+                # here — the person who sent it, the rules, and the model —
+                # and the most severe of them wins.
+                #
+                # Observed live: the model rated "three people in the water,
+                # one is not moving" as EMERGENCY while the rules rated it
+                # LIFE_CRITICAL. Under-triage is the dangerous direction, so
+                # no judge is allowed to talk the others down.
+                floor: Priority = baseline.get("severity", report.priority)
+                if proposed.rank < min(floor.rank, report.priority.rank):
                     out["severity"] = proposed
+                else:
+                    out["severity"] = (
+                        floor if floor.rank <= report.priority.rank
+                        else report.priority
+                    )
             except ValueError:
                 pass
         count = raw.get("people_affected")
@@ -175,7 +212,11 @@ class GeminiReasoner(Reasoner):
             out["description"] = raw["description"].strip()
         confidence = raw.get("confidence")
         if isinstance(confidence, (int, float)) and 0.0 <= confidence <= 1.0:
-            out["confidence"] = round(float(confidence), 2)
+            # Capped, as the rule-based path is. A model will happily return
+            # 1.0 for a single unverified sentence from one stranger, and an
+            # operator reading "100% confidence" beside an unconfirmed report
+            # is being misled. Certainty is not available from one source.
+            out["confidence"] = round(min(float(confidence), MAX_CONFIDENCE), 2)
 
         return out
 

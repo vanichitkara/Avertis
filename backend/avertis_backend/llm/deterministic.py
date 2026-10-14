@@ -50,6 +50,12 @@ _CRITICAL_PHRASES = (
     "dying", "not breathing", "unconscious", "drowning", "bleeding badly",
     "severe", "critical", "trapped", "buried", "cannot breathe",
     "can't breathe", "water ris",
+    # Ordinary ways people describe someone unresponsive. A live Gemini call
+    # rated "one is not moving" life-critical while these rules rated it
+    # NORMAL, which is the wrong way round for the engine that runs by
+    # default.
+    "not moving", "unresponsive", "not responding", "won't wake",
+    "will not wake", "no pulse",
 )
 _EMERGENCY_PHRASES = (
     "injured", "hurt", "help", "urgent", "stranded", "fire", "flood",

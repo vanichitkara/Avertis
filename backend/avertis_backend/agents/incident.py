@@ -19,6 +19,7 @@ from __future__ import annotations
 import itertools
 
 from ..llm.base import Reasoner
+from ..llm.deterministic import haversine_m
 from ..models import (
     AgentActivity,
     Evidence,
@@ -112,13 +113,61 @@ class IncidentAgent:
 
     # -- fusion ------------------------------------------------------------
 
-    def _find_fusion_candidate(
-        self, report: RawReport
-    ) -> tuple[Incident, str] | None:
-        """The first open incident the reasoner agrees this report belongs to."""
+    #: Only incidents within this radius are even considered for fusion.
+    #: Generous compared with the reasoner's own threshold, because this is a
+    #: cheap pre-filter — it exists to avoid asking about obviously unrelated
+    #: events, not to make the decision.
+    CANDIDATE_RADIUS_M = 1000.0
+    CANDIDATE_WINDOW_S = 3600.0
+
+    #: At most this many incidents are put to the reasoner for one report.
+    #: With a language model each question is a network round trip, so asking
+    #: about every open incident turns one report into a minutes-long stall:
+    #: sixty incidents meant sixty sequential API calls. Geography narrows it
+    #: to the handful that could plausibly be the same event.
+    MAX_CANDIDATES = 5
+
+    def _plausible_candidates(self, report: RawReport) -> list[Incident]:
+        """Open incidents near enough in space and time to be worth asking about.
+
+        Pure arithmetic, no model calls. Nearest first, so the most likely
+        match is judged before the budget runs out.
+        """
+        scored: list[tuple[float, Incident]] = []
+
         for incident in self.store.list_incidents():
             if incident.status.value == "RESOLVED":
                 continue
+
+            newest = max((e.created_at for e in incident.evidence),
+                         default=incident.created_at)
+            if abs((report.created_at - newest).total_seconds()) > \
+                    self.CANDIDATE_WINDOW_S:
+                continue
+
+            distance = 0.0
+            if incident.location and report.location:
+                distance = haversine_m(
+                    incident.location.lat, incident.location.lon,
+                    report.location.lat, report.location.lon,
+                )
+                if distance > self.CANDIDATE_RADIUS_M:
+                    continue
+            # An incident with no location cannot be excluded on geography,
+            # so it stays a candidate and sorts last.
+            elif incident.location is None or report.location is None:
+                distance = self.CANDIDATE_RADIUS_M
+
+            scored.append((distance, incident))
+
+        scored.sort(key=lambda pair: pair[0])
+        return [incident for _, incident in scored[:self.MAX_CANDIDATES]]
+
+    def _find_fusion_candidate(
+        self, report: RawReport
+    ) -> tuple[Incident, str] | None:
+        """The first plausible incident the reasoner agrees this belongs to."""
+        for incident in self._plausible_candidates(report):
             fuse, reason = self.reasoner.should_fuse(incident, report)
             if fuse:
                 return incident, reason

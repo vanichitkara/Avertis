@@ -299,3 +299,18 @@ class TestStatedHeadcount:
             people_count=4,
         ))
         assert with_count.confidence > without.confidence
+
+
+class TestUnresponsivePhrasing:
+    @pytest.mark.parametrize("text", [
+        "three people in the water, one is not moving",
+        "my neighbour is unresponsive",
+        "he is not responding",
+        "she won't wake up",
+    ])
+    def test_describing_someone_unresponsive_is_life_critical(self, agent, text):
+        # Found by comparing the rules against a live Gemini call: the model
+        # rated these life-critical and the rules rated them NORMAL. The
+        # rules are the default engine, so that gap mattered.
+        incident, _ = agent.ingest(report("rpt-x", text))
+        assert incident.severity == Priority.LIFE_CRITICAL

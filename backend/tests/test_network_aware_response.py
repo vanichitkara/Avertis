@@ -291,3 +291,22 @@ class TestSafety:
         incident = coordinator.store.list_incidents()[0]
         rec = coordinator.recommendation_for(incident.incident_id)
         assert "RECOMMENDED_RESPONDER_UNREACHABLE" in rec.safety_flags
+
+
+def test_the_links_key_means_the_same_thing_everywhere(coordinator):
+    """One key, one type.
+
+    /api/v1/world puts the link list under "links". The summary used to put a
+    count there too, so the same path meant an int on one endpoint and a list
+    on another — and whichever a consumer assumed, it would be right half the
+    time.
+    """
+    coordinator.ingest_sync(_healthy_mesh())
+
+    summary = coordinator.network_view().summary()
+    assert isinstance(summary["link_count"], int)
+    assert "links" not in summary
+
+    world = coordinator.world()
+    assert isinstance(world["network"]["links"], list)
+    assert world["network"]["link_count"] == len(world["network"]["links"])

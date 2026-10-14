@@ -56,6 +56,34 @@ curl -s localhost:8000/api/v1/health | python3 -m json.tool
 which of the two steps is missing — the command centre header shows the same
 thing, and neither will claim Gemini is running when it is not.
 
+### If the model is busy
+
+Flagship models get rate-spiked. A 503 or 504 degrades to rules, which is safe
+but loses the Gemini story mid-demo. Switch models in `.env`:
+
+```
+GEMINI_MODEL=gemini-3.1-flash-lite
+```
+
+Every call is capped at 12 seconds (the API's own minimum deadline is 10),
+because without a cap the SDK retries internally for minutes and the incident
+pipeline blocks behind it.
+
+### What the model is and is not allowed to do
+
+Model output is validated, not trusted:
+
+- **severity may only be raised.** The sender's priority, the rules and the
+  model all get a say, and the most severe wins. Observed live: the model
+  rated "three people in the water, one is not moving" as EMERGENCY while the
+  rules rated it LIFE_CRITICAL. Under-triage is the dangerous direction.
+- **confidence is capped at 0.95.** A live call returned 1.0 for a single
+  unverified sentence; "100% confidence" beside one stranger's report misleads
+  whoever is deciding what to send.
+- **an unrecognised incident type is discarded** in favour of the rules.
+- **a headcount outside 1–999 is ignored**, and a count the sender stated
+  outright always wins.
+
 ## Persistence
 
 In-memory by default — state is lost on restart. To persist, set
