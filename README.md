@@ -122,6 +122,8 @@ cd mobile && flutter test
   packet. Emulators have no BLE, so this cannot be closed without hardware —
   it is the one gap that only handsets can close.
 - Everything on my teammate's side, and the integration against it
+For the pitch and submission text, see `docs/overview.md`.
+
 Before submitting, work through `docs/pre-submission-checklist.md`.
 
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`
