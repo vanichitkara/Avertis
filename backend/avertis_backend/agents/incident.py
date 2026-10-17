@@ -68,7 +68,36 @@ class IncidentAgent:
                 return candidate
         raise RuntimeError("could not allocate an unused incident id")
 
-    def ingest(self, report: RawReport) -> tuple[Incident, bool]:
+    #: How many reports to structure at once.
+    #:
+    #: Each costs one model round trip of 10-20s, and a sync can carry
+    #: ninety. Done one after another that is twenty minutes, during which
+    #: the gateway's client has long since timed out and the operator sees
+    #: nothing. Structuring one report does not depend on any other, so it
+    #: parallelises safely — fusion, which does depend on order, stays
+    #: strictly sequential below.
+    STRUCTURE_WORKERS = 8
+
+    def structure_many(
+        self, reports: list[RawReport]
+    ) -> dict[str, dict]:
+        """Pre-compute the structure for a batch, concurrently."""
+        if len(reports) <= 1:
+            return {
+                r.report_id: self.reasoner.structure_report(r)
+                for r in reports
+            }
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        workers = min(self.STRUCTURE_WORKERS, len(reports))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(self.reasoner.structure_report, reports))
+        return {r.report_id: out for r, out in zip(reports, results)}
+
+    def ingest(
+        self, report: RawReport, structured: dict | None = None
+    ) -> tuple[Incident, bool]:
         """Process one report.
 
         Returns (incident, was_fused). Idempotent: re-syncing a report that
@@ -82,7 +111,8 @@ class IncidentAgent:
             if known:
                 return known, True
 
-        structured = self.reasoner.structure_report(report)
+        if structured is None:
+            structured = self.reasoner.structure_report(report)
 
         candidate = self._find_fusion_candidate(report)
         if candidate is not None:

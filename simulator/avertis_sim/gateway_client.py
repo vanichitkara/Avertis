@@ -83,7 +83,16 @@ class InMemoryBackend:
 class HttpBackend:
     """Real backend over HTTP."""
 
-    def __init__(self, base_url: str, api_key: str = "", timeout: float = 10.0):
+    def __init__(self, base_url: str, api_key: str = "",
+                 timeout: float = 120.0):
+        """
+        The default timeout is generous on purpose. A sync carrying reports
+        costs the backend a model call per report — 10-20s each, batched but
+        not free — so a client that gives up after ten seconds reports a
+        wasted window for a sync the backend actually completed. That is
+        worse than waiting: the report shows as deferred, the next window
+        re-sends it, and the operator sees the whole sequence out of order.
+        """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout

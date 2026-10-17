@@ -58,9 +58,12 @@ class HttpSyncBackend implements SyncBackend {
   HttpSyncBackend({required String baseUrl, String apiKey = ''})
       : _dio = Dio(BaseOptions(
           baseUrl: baseUrl.replaceAll(RegExp(r'/+$'), ''),
-          connectTimeout: const Duration(seconds: 5),
-          sendTimeout: const Duration(seconds: 20),
-          receiveTimeout: const Duration(seconds: 20),
+          connectTimeout: const Duration(seconds: 10),
+          // The backend spends a model call per report, 10-20s each. A
+          // client that gives up sooner reports a wasted window for a sync
+          // the backend completed, and the report is re-sent next time.
+          sendTimeout: const Duration(seconds: 90),
+          receiveTimeout: const Duration(seconds: 90),
           headers: {
             'Content-Type': 'application/json',
             if (apiKey.isNotEmpty) 'X-Avertis-Key': apiKey,

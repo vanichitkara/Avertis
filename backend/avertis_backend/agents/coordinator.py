@@ -107,12 +107,23 @@ class Coordinator:
         rejected: list[tuple[str, str]] = []
         outcomes: list[tuple[str, str, str | None]] = []
 
+        # One model call per report, run as a batch rather than one after
+        # another. Fusion still happens in order below, because whether a
+        # report joins an existing incident depends on the ones before it.
+        usable = [
+            r for r in request.incidents
+            if r.location is not None or r.text or r.transcript
+        ]
+        structures = self.incidents.structure_many(usable)
+
         for report in request.incidents:
             if report.location is None and not (report.text or report.transcript):
                 # Nothing to act on and nowhere to send anyone.
                 rejected.append((report.report_id, "EMPTY_REPORT"))
                 continue
-            incident, fused = self.incidents.ingest(report)
+            incident, fused = self.incidents.ingest(
+                report, structured=structures.get(report.report_id)
+            )
             accepted.append(report.report_id)
             outcomes.append((
                 report.report_id,
