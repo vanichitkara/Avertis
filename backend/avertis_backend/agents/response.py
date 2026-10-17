@@ -123,6 +123,7 @@ class ResponseAgent:
         responders: list[Responder],
         network: NetworkView,
         hazard_lookup=None,
+        previous: Recommendation | None = None,
     ) -> Recommendation:
         available = [r for r in responders if r.available]
         if not available:
@@ -140,7 +141,21 @@ class ResponseAgent:
         ranked = sorted(assessments, key=self.score, reverse=True)
         chosen = ranked[0]
 
-        why = self.reasoner.explain_choice(incident, chosen, ranked)
+        # Only pay for a fresh explanation when the answer actually moved.
+        #
+        # Every sync re-plans every open incident. With a model behind
+        # explain_choice that was one API call per incident per sync — a
+        # steady spend, and a latency cost inside a connectivity window,
+        # for text that had not changed. Reuse the previous wording when
+        # the same responder is still chosen for materially the same
+        # reasons.
+        why = None
+        if previous is not None and previous.why:
+            same_choice = previous.recommended_responder == chosen.responder_id
+            if same_choice and _materially_same(previous.chosen, chosen):
+                why = previous.why
+        if why is None:
+            why = self.reasoner.explain_choice(incident, chosen, ranked)
 
         recommendation = Recommendation(
             incident_id=incident.incident_id,
@@ -165,3 +180,29 @@ class ResponseAgent:
             reasoned_by=self.reasoner.name,
         ))
         return recommendation
+
+
+def _materially_same(
+    before: ResponderAssessment | None, after: ResponderAssessment
+) -> bool:
+    """Would a new explanation say anything different?
+
+    Reachability and distance drift slightly on every sync as link
+    stability is re-estimated. Rewriting the WHY because a figure moved by
+    a percentage point is not worth a model call, but a change an operator
+    would notice is.
+    """
+    if before is None:
+        return False
+    if before.reachable != after.reachable:
+        return False
+    if before.hazard_exposure != after.hazard_exposure:
+        return False
+    if abs(before.network_reliability - after.network_reliability) > 0.10:
+        return False
+    if (before.distance_m is None) != (after.distance_m is None):
+        return False
+    if before.distance_m is not None and after.distance_m is not None:
+        if abs(before.distance_m - after.distance_m) > 50:
+            return False
+    return True

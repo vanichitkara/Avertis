@@ -385,6 +385,29 @@ void main() {
     });
   });
 
+  group('reachability', () {
+    test('health is what decides connectivity, not a guess', () async {
+      final reachable = _HealthBackend(healthy: true);
+      final unreachable = _HealthBackend(healthy: false);
+
+      expect(await reachable.health(), isTrue);
+      expect(await unreachable.health(), isFalse);
+      expect(reachable.healthChecks, 1);
+    });
+
+    test('a held report is still there until a sync accepts it', () async {
+      hold(engine, reportId: 'rpt-1', priority: Priority.lifeCritical,
+          createdAt: t0);
+
+      // Before any sync the report is held — this is what the home screen
+      // counts, and it must not read zero while something is undelivered.
+      expect(client.heldReports(), hasLength(1));
+
+      await client.sync(windowSeconds: 18);
+      expect(client.heldReports(), isEmpty);
+    });
+  });
+
   group('fields the operator acts on', () {
     test('a stated headcount reaches the backend', () async {
       final packet = hold(engine, reportId: 'rpt-1',
@@ -436,4 +459,18 @@ void main() {
           reason: 'the descriptor itself must still travel');
     });
   });
+}
+
+/// Reachability drives both the connectivity shown on the home screen and
+/// whether a held report is delivered without anyone pressing a button.
+class _HealthBackend extends FakeBackend {
+  _HealthBackend({required this.healthy});
+  final bool healthy;
+  int healthChecks = 0;
+
+  @override
+  Future<bool> health() async {
+    healthChecks++;
+    return healthy;
+  }
 }

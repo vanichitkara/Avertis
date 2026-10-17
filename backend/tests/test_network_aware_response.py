@@ -310,3 +310,68 @@ def test_the_links_key_means_the_same_thing_everywhere(coordinator):
     world = coordinator.world()
     assert isinstance(world["network"]["links"], list)
     assert world["network"]["link_count"] == len(world["network"]["links"])
+
+
+class TestExplanationReuse:
+    """The WHY is not regenerated when it would say the same thing.
+
+    Every sync re-plans every open incident, and with a model behind the
+    explanation that was one API call per incident per sync — a continuous
+    spend, and latency inside a connectivity window, for text that had not
+    changed.
+    """
+
+    class CountingReasoner(DeterministicReasoner):
+        def __init__(self):
+            super().__init__()
+            self.explanations = 0
+
+        def explain_choice(self, incident, chosen, alternatives):
+            self.explanations += 1
+            return super().explain_choice(incident, chosen, alternatives)
+
+    def test_an_unchanged_plan_does_not_re_explain(self):
+        reasoner = self.CountingReasoner()
+        c = Coordinator(reasoner, MemoryStore())
+
+        c.ingest_sync(_healthy_mesh())
+        after_first = reasoner.explanations
+        assert after_first >= 1
+
+        for _ in range(3):
+            c.ingest_sync(_healthy_mesh())
+
+        assert reasoner.explanations == after_first, (
+            "an unchanged recommendation should reuse its explanation"
+        )
+
+    def test_a_changed_plan_gets_a_fresh_explanation(self):
+        reasoner = self.CountingReasoner()
+        c = Coordinator(reasoner, MemoryStore())
+
+        c.ingest_sync(_healthy_mesh())
+        before = reasoner.explanations
+
+        c.ingest_sync(_mesh_without_r7())
+
+        assert reasoner.explanations > before, (
+            "the responder changed, so the WHY must be rewritten"
+        )
+        incident = c.store.list_incidents()[0]
+        assert "resp-B" in c.recommendation_for(incident.incident_id).why
+
+    def test_a_material_change_in_reachability_re_explains(self):
+        from avertis_backend.agents.response import _materially_same
+        from avertis_backend.models import ResponderAssessment
+
+        before = ResponderAssessment(responder_id="A", distance_m=200,
+                                     network_reliability=0.95, reachable=True)
+        # A percentage point of drift is not worth a model call.
+        drift = ResponderAssessment(responder_id="A", distance_m=205,
+                                    network_reliability=0.94, reachable=True)
+        assert _materially_same(before, drift)
+
+        # Losing reachability is.
+        lost = ResponderAssessment(responder_id="A", distance_m=200,
+                                   network_reliability=0.05, reachable=False)
+        assert not _materially_same(before, lost)

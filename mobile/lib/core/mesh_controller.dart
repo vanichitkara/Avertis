@@ -159,6 +159,17 @@ class MeshController extends ChangeNotifier {
   /// assumed — it is the value the platform returned.
   bool backgroundRelayActive = false;
 
+  Timer? _reachabilityTimer;
+  bool _syncInFlight = false;
+
+  /// How often to ask whether the command centre can be reached.
+  ///
+  /// "Internet" here means exactly that — not whether Wi-Fi is associated,
+  /// which tells a survivor nothing. A captive portal, a dead uplink or a
+  /// backend that is down all look like working Wi-Fi to the OS and like no
+  /// connectivity to this app, which is the honest reading.
+  static const Duration reachabilityInterval = Duration(seconds: 20);
+
   Future<void> start({
     required String nodeId,
     NodeRole role = NodeRole.survivor,
@@ -217,6 +228,18 @@ class MeshController extends ChangeNotifier {
     unawaited(_startBackgroundRelay());
     _statusTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _refreshStatus());
+
+    // Find out whether the backend is actually reachable, rather than
+    // assuming it is not until someone presses a button. Without this the
+    // home screen reads "Internet OFFLINE" on a phone with perfectly good
+    // Wi-Fi, and nothing ever corrects it.
+    if (hasBackend) {
+      unawaited(_checkReachability());
+      _reachabilityTimer = Timer.periodic(
+        reachabilityInterval,
+        (_) => unawaited(_checkReachability()),
+      );
+    }
     _refreshStatus();
   }
 
@@ -250,6 +273,42 @@ class MeshController extends ChangeNotifier {
     _internetOnline = result.ok;
     if (!_disposed) notifyListeners();
     return result;
+  }
+
+  /// Ask the backend whether it is there, and deliver anything waiting.
+  ///
+  /// Auto-sync only runs when there is actually something to send. A
+  /// periodic empty sync would still make the backend re-plan every open
+  /// incident, and each re-plan asks the model for a fresh explanation —
+  /// a steady drip of API calls for no new information.
+  Future<void> _checkReachability() async {
+    final gateway = _gateway;
+    if (gateway == null || _disposed) return;
+
+    final reachable = await gateway.backend.health();
+    if (_disposed) return;
+
+    final becameReachable = reachable && !_internetOnline;
+    _internetOnline = reachable;
+    notifyListeners();
+
+    if (!reachable) return;
+
+    final waiting = gateway.heldReports().isNotEmpty;
+    if (waiting && !_syncInFlight) {
+      // Deliver without being asked. A survivor should not have to find a
+      // button on a diagnostics screen for their report to leave the
+      // phone — and when connectivity is intermittent, the window may be
+      // gone by the time they do.
+      _syncInFlight = true;
+      try {
+        await syncNow();
+      } finally {
+        _syncInFlight = false;
+      }
+    } else if (becameReachable) {
+      notifyListeners();
+    }
   }
 
   /// Re-offer reports that were never acknowledged before the app died.
@@ -408,6 +467,7 @@ class MeshController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _statusTimer?.cancel();
+    _reachabilityTimer?.cancel();
     unawaited(_locationSub?.cancel());
     unawaited(locationService.dispose());
     unawaited(meshService.stop());

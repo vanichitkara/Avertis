@@ -174,7 +174,9 @@ class Coordinator:
         self, incident: Incident, responders: list[Responder], view: NetworkView
     ) -> bool:
         previous = self._recommendations.get(incident.incident_id)
-        fresh = self.response.recommend(incident, responders, view)
+        fresh = self.response.recommend(
+            incident, responders, view, previous=previous
+        )
         fresh = self.safety.review(incident, fresh)
 
         if previous is None:
