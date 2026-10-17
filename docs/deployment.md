@@ -234,12 +234,91 @@ That produces one APK per architecture (~20 MB each). For modern phones,
 
 ### Install on a phone
 
+No Mac required. `adb` is convenient when the phone is plugged in, but the
+APK is just a file:
+
 ```bash
-adb install -r build/app/outputs/flutter-apk/app-release.apk
+adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-Or share the file directly — the phone must allow installing from unknown
-sources.
+To install without a cable, put the APK somewhere the phone can reach —
+Google Drive, WhatsApp to yourself, email, or a USB cable in file-transfer
+mode — open it on the phone, and allow installing from unknown sources when
+asked. Android 8+ asks per app, so it will name whichever app you opened it
+from (Files, Drive, Chrome).
+
+---
+
+## 3b. Giving the APK to judges
+
+This is worth getting right, because an APK that cannot reach a backend
+tells a judge much less than one that can.
+
+### The backend URL is compiled in
+
+There is no settings screen for it. Whatever `--dart-define` you build with
+is what that APK will talk to, forever. So:
+
+- **A build pointed at `10.0.2.2`** works only on an emulator.
+- **A build pointed at `192.168.1.165`** works only on your Wi-Fi. A judge
+  at home gets nothing.
+- **A build pointed at your Cloud Run URL** works anywhere with internet.
+  This is the one to distribute.
+
+Which means: **deploy to Cloud Run before you build the judges' APK.** Until
+then there is no address that works off your network.
+
+```bash
+URL=$(gcloud run services describe avertis --region asia-south1 \
+        --format='value(status.url)')
+
+cd mobile
+flutter build apk --release --split-per-abi --dart-define=AVERTIS_API_BASE=$URL
+```
+
+### Which file to give them
+
+| File | Size | Who it is for |
+|---|---|---|
+| `app-arm64-v8a-release.apk` | 20 MB | **Almost every phone since ~2017.** Give them this. |
+| `app-armeabi-v7a-release.apk` | 18 MB | Older 32-bit devices |
+| `app-release.apk` (no split) | 55 MB | One file that runs anywhere, if you would rather not explain architectures |
+
+Upload to Drive, set the link to "anyone with the link", and put it in the
+submission. Mention the phone will warn about an unknown developer — it is
+signed with debug keys (see above), which is normal for a hackathon build
+and worth stating plainly rather than letting them wonder.
+
+### What a judge can test with one phone and no backend
+
+Most of the app, as it happens. It is offline-first by design — verified
+with the backend deliberately unreachable, no crash:
+
+- SOS, including the headcount and the location state
+- Incident reports with voice and photo
+- My reports, surviving a force-quit
+- The mesh screen, the radio switch, the situation view
+- The honest messaging: *"No nodes in range yet. It is saved on this device
+  and will be sent automatically when one appears."*
+
+What needs the backend: **SYNC NOW** and anything appearing in the command
+centre. What needs **two phones**: the mesh actually carrying anything.
+
+Say this in the submission. A judge with one phone who taps SOS and sees
+"saved, will send when a node appears" has understood the product. A judge
+who taps SYNC NOW against a dead URL and sees a failure has learned nothing
+except that your backend is down.
+
+### Suggested wording for the submission
+
+> **Android APK** (arm64, 20 MB) — install and open; no account needed.
+> Signed with debug keys, so Android will warn about an unknown developer.
+>
+> One phone, no setup: SOS, voice and photo reports, the mesh screen and the
+> situation view all work offline — that is the point of the app.
+> **Two phones** in Bluetooth range show the mesh relaying between them.
+> **SYNC NOW** on the mesh screen pushes incidents to the live command
+> centre at <your Cloud Run URL>, which you can open in a browser.
 
 ### Signing — read this before distributing
 
