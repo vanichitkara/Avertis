@@ -4,7 +4,7 @@
 
 Avertis is an offline-first disaster-response platform that combines a Bluetooth Low Energy (BLE) mesh, incident intelligence, and network-aware responder recommendations. It is designed for the moments when normal communications are degraded or unavailable: phones relay reports across a local mesh, gateways synchronise when a connectivity window appears, and an operator sees recommendations that account for both the emergency and the state of the network.
 
-The central idea is simple: the closest responder is not always the best responder if they cannot reliably communicate with the incident. Avertis continuously re-evaluates recommendations as the incident picture *or* mesh topology changes.
+The central idea is simple: the closest responder is not always the best responder if they cannot reliably communicate with the incident. Avertis continuously re-evaluates recommendations as the incident picture _or_ mesh topology changes.
 
 ## Highlights
 
@@ -44,14 +44,14 @@ avertis/
 
 ## Technology stack
 
-| Area | Technologies |
-| --- | --- |
-| Mobile | Flutter, Dart, Riverpod, GoRouter, Drift/SQLite, Bluetooth LE, Kotlin platform channels |
-| Backend | Python, FastAPI, Pydantic, Uvicorn; optional Gemini, Firestore, and Cloud Storage |
-| Simulation | Python, NetworkX, HTTPX, pytest |
-| Command centre | HTML, CSS, and vanilla JavaScript |
-| Deployment | Docker and Google Cloud Run |
-| Quality | Flutter test, pytest, shared protocol fixtures, integration tests |
+| Area           | Technologies                                                                            |
+| -------------- | --------------------------------------------------------------------------------------- |
+| Mobile         | Flutter, Dart, Riverpod, GoRouter, Drift/SQLite, Bluetooth LE, Kotlin platform channels |
+| Backend        | Python, FastAPI, Pydantic, Uvicorn; optional Gemini, Firestore, and Cloud Storage       |
+| Simulation     | Python, NetworkX, HTTPX, pytest                                                         |
+| Command centre | HTML, CSS, and vanilla JavaScript                                                       |
+| Deployment     | Docker and Google Cloud Run                                                             |
+| Quality        | Flutter test, pytest, shared protocol fixtures, integration tests                       |
 
 ## Quick start
 
@@ -131,12 +131,12 @@ Copy the template and configure only the services you need:
 cp backend/.env.example backend/.env
 ```
 
-| Variable | Effect |
-| --- | --- |
-| `GEMINI_API_KEY` | Enables Gemini-assisted report structuring, fusion, summaries, and explanations. Install `google-genai` as well. |
-| `FIRESTORE_PROJECT` | Persists operational state beyond process restarts. Install `google-cloud-firestore`. |
-| `STORAGE_BUCKET` | Stores uploaded media durably in Cloud Storage. Install `google-cloud-storage`. |
-| `AVERTIS_API_KEY` | Requires the `X-Avertis-Key` header for write endpoints. |
+| Variable            | Effect                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`    | Enables Gemini-assisted report structuring, fusion, summaries, and explanations. Install `google-genai` as well. |
+| `FIRESTORE_PROJECT` | Persists operational state beyond process restarts. Install `google-cloud-firestore`.                            |
+| `STORAGE_BUCKET`    | Stores uploaded media durably in Cloud Storage. Install `google-cloud-storage`.                                  |
+| `AVERTIS_API_KEY`   | Requires the `X-Avertis-Key` header for write endpoints.                                                         |
 
 The service advertises its actual reasoning, persistence, and media backends at `/api/v1/health`, so a fallback mode is never represented as a cloud-backed one.
 
@@ -174,14 +174,6 @@ Recommendations carry supporting measurements and safety flags, but they do not 
 
 Read the complete [architecture guide](docs/architecture.md) and [gateway API contract](docs/api.md) for data flow and endpoint details.
 
-## Current status and limitations
-
-The platform includes the Flutter Android application, Dart and Python mesh engines, a simulator with failure injection and replay, the FastAPI service, and the command centre.
-
-The Android BLE transport includes both central and peripheral roles, but it still requires validation on two or more physical Android devices. Android emulators do not provide the BLE hardware needed to prove real-radio discovery, connection stability, or multi-phone forwarding. The simulator and mock transports validate the protocol and behaviours above the radio layer; they are not a substitute for handset testing.
-
-This is a prototype for demonstration and research. It is **not** certified emergency-response software and must not be relied upon as the sole means of requesting or coordinating real-world emergency assistance.
-
 ## Documentation
 
 - [Project overview and evidence](docs/overview.md)
@@ -192,20 +184,7 @@ This is a prototype for demonstration and research. It is **not** certified emer
 - [Two-phone BLE testing](docs/two-phone-testing.md)
 - [Deployment guide](docs/deployment.md)
 - [Benchmarks and caveats](docs/benchmarks.md)
-- [Judge-facing summary](docs/for-judges.md)
 
 ## Deployment
 
 The root [`Dockerfile`](Dockerfile) packages the backend and command centre in one Cloud Run service. For local work, the in-memory backend needs no credentials. For a durable deployment, configure Firestore and Cloud Storage, then follow the [deployment guide](docs/deployment.md).
-
-## Contributing
-
-1. Keep protocol changes deliberate: [`docs/protocol.md`](docs/protocol.md) and [`docs/api.md`](docs/api.md) are shared contracts.
-2. Preserve the deterministic/AI boundary—models may explain or enrich a decision, but not operate the mesh hop path.
-3. Add or update tests with behaviour changes, including shared fixtures when protocol compatibility is affected.
-4. Do not commit `.env` files, API keys, media, build output, or generated local state.
-5. Run the relevant component test suite before opening a change.
-
-## License
-
-No license has been added to this repository yet. Contact the project maintainers before reusing or redistributing the code.
