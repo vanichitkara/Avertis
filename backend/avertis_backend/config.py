@@ -68,6 +68,10 @@ class Settings:
     def firestore_configured(self) -> bool:
         return bool(self.firestore_project)
 
+    @property
+    def storage_configured(self) -> bool:
+        return bool(self.storage_bucket)
+
 
 def load_settings() -> Settings:
     _load_env_file()
@@ -135,3 +139,38 @@ def build_store(settings: Settings):
     except Exception as exc:  # noqa: BLE001
         log.warning("could not reach Firestore (%s) — using memory", exc)
         return MemoryStore()
+
+
+def build_media_storage(settings: Settings):
+    """Pick where media bytes live, announcing whether they will survive."""
+    from .storage.local import LocalMediaStorage
+
+    if not settings.storage_configured:
+        log.info(
+            "STORAGE_BUCKET not set — media goes to %s on local disk. On "
+            "Cloud Run that disk is per-instance and is discarded on "
+            "restart.",
+            settings.media_dir,
+        )
+        return LocalMediaStorage(settings.media_dir)
+
+    try:
+        from .storage.gcs import GcsMediaStorage
+
+        storage = GcsMediaStorage(
+            settings.storage_bucket, settings.firestore_project or None
+        )
+        log.info("media goes to gs://%s", settings.storage_bucket)
+        return storage
+    except ImportError:
+        log.warning(
+            "STORAGE_BUCKET is set but google-cloud-storage is not installed "
+            "(pip install google-cloud-storage) — falling back to local disk."
+        )
+        return LocalMediaStorage(settings.media_dir)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "could not reach bucket %s (%s) — falling back to local disk",
+            settings.storage_bucket, exc,
+        )
+        return LocalMediaStorage(settings.media_dir)

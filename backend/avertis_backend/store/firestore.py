@@ -20,6 +20,11 @@ from __future__ import annotations
 from ..models import AgentActivity, Incident, LinkSnapshot, NodeSnapshot, Responder
 from .base import Store
 
+try:  # optional dependency; only needed when Firestore is configured
+    from google.cloud.firestore_v1.base_query import FieldFilter
+except ImportError:  # pragma: no cover - exercised only without the SDK
+    FieldFilter = None  # type: ignore[assignment]
+
 
 class FirestoreStore(Store):
     name = "firestore"
@@ -68,7 +73,7 @@ class FirestoreStore(Store):
         for collection in ("nodes", "links"):
             stale = (
                 self._db.collection(collection)
-                .where("reported_by", "==", gateway_id)
+                .where(filter=FieldFilter("reported_by", "==", gateway_id))
                 .stream()
             )
             for doc in stale:

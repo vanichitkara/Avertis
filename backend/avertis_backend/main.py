@@ -14,11 +14,16 @@ import pathlib
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from .agents.coordinator import Coordinator
-from .config import build_reasoner, build_store, load_settings
+from .config import (
+    build_media_storage,
+    build_reasoner,
+    build_store,
+    load_settings,
+)
 from .models import (
     GatewayCommand,
     GatewaySyncRequest,
@@ -36,6 +41,7 @@ log = logging.getLogger("avertis")
 settings = load_settings()
 reasoner = build_reasoner(settings)
 store = build_store(settings)
+media_storage = build_media_storage(settings)
 coordinator = Coordinator(reasoner, store)
 
 MAX_SYNC_BYTES = 2 * 1024 * 1024  # docs/api.md
@@ -88,6 +94,13 @@ def health() -> dict:
             "note": _reasoning_note(),
         },
         "store": store.name,
+        "media": {
+            "backend": media_storage.name,
+            # Says plainly whether a photo survives a restart. On Cloud Run
+            # local disk does not, and an operator should not believe
+            # evidence is safe when it is not.
+            "durable": media_storage.durable,
+        },
     }
 
 
@@ -171,34 +184,61 @@ async def media_upload(
             detail=f"sha256 mismatch: declared {sha256[:12]}…, got {digest[:12]}…",
         )
 
-    directory = pathlib.Path(settings.media_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    suffix = pathlib.Path(file.filename or "").suffix or ".bin"
-    path = directory / f"{media_id}{suffix}"
-    path.write_bytes(payload)
+    try:
+        stored = media_storage.save(
+            media_id,
+            payload,
+            content_type=file.content_type,
+            filename=file.filename,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # A storage failure loses a photo. It must not also lose the incident
+        # it belongs to, so this is a clean error the client can retry.
+        log.warning("could not store %s: %s", media_id, exc)
+        raise HTTPException(
+            status_code=503, detail="media storage unavailable"
+        ) from exc
 
     descriptor = {
         "media_id": media_id,
         "report_id": report_id,
         "sha256": digest,
-        "bytes": len(payload),
+        "bytes": stored.bytes,
         "content_type": file.content_type,
-        "uri": str(path),
+        "uri": stored.uri,
+        "durable": media_storage.durable,
     }
     store.put_media(media_id, descriptor)
-    return {"media_id": media_id, "uri": descriptor["uri"]}
+    return {"media_id": media_id, "uri": stored.uri}
 
 
 @app.get("/api/v1/media/{media_id}")
 def media_fetch(media_id: str):
-    """Serve a stored file back, so the command centre can show evidence."""
+    """Serve a stored file back, so the command centre can show evidence.
+
+    Read through the backend rather than handed out as a public URL: a photo
+    from a disaster scene is not something to expose on a guessable link.
+    """
     descriptor = store.list_media().get(media_id)
     if descriptor is None:
         raise HTTPException(status_code=404, detail="unknown media_id")
-    path = pathlib.Path(descriptor["uri"])
-    if not path.exists():
-        raise HTTPException(status_code=410, detail="media record exists, file gone")
-    return FileResponse(path, media_type=descriptor.get("content_type"))
+
+    found = media_storage.load(media_id)
+    if found is None:
+        # The record outlived the bytes — which is exactly what happens when
+        # local disk is used on Cloud Run and the instance restarts. Say so
+        # distinctly from "never existed".
+        raise HTTPException(
+            status_code=410,
+            detail="media record exists but the stored object is gone",
+        )
+
+    payload, content_type = found
+    return Response(
+        content=payload,
+        media_type=content_type or descriptor.get("content_type")
+        or "application/octet-stream",
+    )
 
 
 # -- incidents ---------------------------------------------------------------

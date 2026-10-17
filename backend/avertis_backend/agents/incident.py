@@ -38,10 +38,35 @@ class IncidentAgent:
     def __init__(self, reasoner: Reasoner, store: Store) -> None:
         self.reasoner = reasoner
         self.store = store
-        self._counter = itertools.count(1042)  # plan's example starts at INC-1042
+        # Seeded lazily from whatever is already stored, not from a fixed
+        # start. With a persistent store a fresh in-memory counter would
+        # reissue INC-1042 after every restart and overwrite the incident
+        # already holding that id — observed destroying a life-critical
+        # flood rescue, replaced by an unrelated fire, with no error.
+        self._counter: itertools.count | None = None
+
+    FIRST_ID = 1042  # the plan's example starts here
+
+    def _seed_counter(self) -> itertools.count:
+        highest = self.FIRST_ID - 1
+        for incident in self.store.list_incidents():
+            suffix = incident.incident_id.rsplit("-", 1)[-1]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+        return itertools.count(highest + 1)
 
     def _next_id(self) -> str:
-        return f"INC-{next(self._counter)}"
+        if self._counter is None:
+            self._counter = self._seed_counter()
+
+        # Belt and braces: a concurrent instance may have taken the next id
+        # between our seeding and now. Overwriting someone's incident is bad
+        # enough to be worth the lookup.
+        for _ in range(1000):
+            candidate = f"INC-{next(self._counter)}"
+            if self.store.get_incident(candidate) is None:
+                return candidate
+        raise RuntimeError("could not allocate an unused incident id")
 
     def ingest(self, report: RawReport) -> tuple[Incident, bool]:
         """Process one report.

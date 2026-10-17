@@ -18,7 +18,15 @@ from avertis_backend.llm.deterministic import (
     classify_type,
     extract_people_count,
 )
-from avertis_backend.models import GeoPoint, IncidentType, Priority, RawReport
+import itertools
+
+from avertis_backend.models import (
+    GeoPoint,
+    Incident,
+    IncidentType,
+    Priority,
+    RawReport,
+)
 from avertis_backend.store.memory import MemoryStore
 
 BRIDGE = GeoPoint(lat=12.9716, lon=77.5946)
@@ -314,3 +322,51 @@ class TestUnresponsivePhrasing:
         # rules are the default engine, so that gap mattered.
         incident, _ = agent.ingest(report("rpt-x", text))
         assert incident.severity == Priority.LIFE_CRITICAL
+
+
+class TestIdAllocation:
+    """Ids must not be reissued when the store outlives the process.
+
+    With the in-memory store a restart cleared everything, so a counter
+    starting from a fixed number was safe. Persistence removed that safety:
+    the second run reissued INC-1042 and silently overwrote a life-critical
+    incident with an unrelated one.
+    """
+
+    def test_ids_continue_from_what_is_already_stored(self):
+        store = MemoryStore()
+        first = IncidentAgent(DeterministicReasoner(), store)
+        first.ingest(report("rpt-1", "flooded bridge, people trapped"))
+        first.ingest(report("rpt-2", "fire in the market", loc=FAR,
+                            node="node-02"))
+        existing = {i.incident_id for i in store.list_incidents()}
+
+        # A new agent over the same store — the restart case.
+        restarted = IncidentAgent(DeterministicReasoner(), store)
+        restarted.ingest(report("rpt-3", "collapsed wall on the highway",
+                                loc=GeoPoint(lat=14.0, lon=78.0), node="node-03"))
+
+        new_ids = {i.incident_id for i in store.list_incidents()} - existing
+        assert len(new_ids) == 1
+        assert not (new_ids & existing), "an id was reissued"
+        assert len(store.list_incidents()) == 3, "an incident was overwritten"
+
+    def test_nothing_stored_starts_at_the_plan_s_first_id(self):
+        agent = IncidentAgent(DeterministicReasoner(), MemoryStore())
+        incident, _ = agent.ingest(report("rpt-1", "flooded bridge"))
+        assert incident.incident_id == "INC-1042"
+
+    def test_an_id_already_taken_is_skipped(self):
+        store = MemoryStore()
+        # Something else holds the id our counter would hand out next.
+        store.put_incident(Incident(incident_id="INC-1042",
+                                    description="pre-existing"))
+
+        agent = IncidentAgent(DeterministicReasoner(), store)
+        agent._counter = itertools.count(1042)   # force the collision
+        incident, _ = agent.ingest(
+            report("rpt-1", "unrelated fire", loc=FAR, node="node-09")
+        )
+
+        assert incident.incident_id != "INC-1042"
+        assert store.get_incident("INC-1042").description == "pre-existing"
