@@ -97,12 +97,39 @@ the link can look. Writes (`/gateway/sync`, `/incident/analyze`,
 `/media/upload`, `/response/recommend`) require the key as `X-Avertis-Key`,
 so a stranger who finds the URL cannot run up Gemini charges.
 
-Read it back when you need it:
+Cloud Run holds the authoritative copy — it was set there at deploy time, so
+read it back rather than keeping a second copy that can drift:
 
 ```bash
-gcloud run services describe avertis --region asia-south1 \
-  --format='value(spec.template.spec.containers[0].env)' | tr ',' '\n' | grep AVERTIS_API_KEY
+./tool/write-key.sh
 ```
+
+Use it directly in a command:
+
+```bash
+KEY=$(./tool/write-key.sh)
+
+# drive the deployed service
+cd simulator
+.venv/bin/python -m avertis_sim run response_adaptation \
+  --api https://avertis-687930058257.asia-south1.run.app --api-key "$KEY"
+
+# build an APK that can sync
+cd mobile
+flutter build apk --release --split-per-abi \
+  --dart-define=AVERTIS_API_BASE=https://avertis-687930058257.asia-south1.run.app \
+  --dart-define=AVERTIS_API_KEY="$KEY"
+```
+
+For the dashboard's **approve & dispatch** button, open it with the key in
+the URL:
+
+```
+https://avertis-687930058257.asia-south1.run.app/?key=<the key>
+```
+
+Give judges the plain URL. Reads — the whole dashboard — need no key; only
+writes do.
 
 Pass it to the simulator with `--api-key`, and into an APK build with
 `--dart-define=AVERTIS_API_KEY=...`.
