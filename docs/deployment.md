@@ -92,21 +92,79 @@ curl -s https://avertis-xxxx.run.app/api/v1/health | python3 -m json.tool
 
 Then open the same URL in a browser for the dashboard.
 
-### Persistence
+### Persistence — Firestore
 
 The default store is in-memory, so **state is lost whenever Cloud Run scales
-to zero or restarts** — which it will, between a rehearsal and the real
-demo. For a stable URL you can revisit, add Firestore:
+to zero or restarts** — which it will, between a rehearsal and the real demo.
 
 ```bash
 gcloud firestore databases create --location=asia-south1
+
 gcloud run services update avertis --region asia-south1 \
   --set-env-vars FIRESTORE_PROJECT=nocturne-502617
 ```
 
-Firestore persistence is implemented but has never been exercised. If you
-turn it on, do it well before the demo and re-run the checklist, not on the
-morning.
+Cloud Run's service account needs `roles/datastore.user`. On a personal
+project the default compute service account usually has Editor already; if
+reads fail with a permission error, that is why.
+
+Firestore is exercised by 14 tests against the real emulator, including the
+replace-network behaviour the signature feature depends on, and verified
+keeping incidents across a backend restart. Collections: `incidents`,
+`report_index`, `nodes`, `links`, `responders`, `activity`, `media`.
+
+To develop against the emulator rather than real Firestore — free, local,
+wiped when you stop it:
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@24 \
+  gcloud emulators firestore start --host-port=127.0.0.1:8900 --quiet
+
+# in the backend shell
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8900 FIRESTORE_PROJECT=avertis-dev \
+  .venv/bin/python -m uvicorn avertis_backend.main:app --port 8000
+```
+
+The emulator needs Java 21+; the project's Java 17 will not start it.
+
+### Durable media — Cloud Storage
+
+Without a bucket, photos and voice clips go to the container's local disk.
+Cloud Run discards that on restart and does not share it between instances,
+so an incident record ends up pointing at evidence that no longer exists.
+
+```bash
+gcloud storage buckets create gs://avertis-media-nocturne \
+  --location=asia-south1 --uniform-bucket-level-access
+
+gcloud run services update avertis --region asia-south1 \
+  --set-env-vars STORAGE_BUCKET=avertis-media-nocturne
+```
+
+Cloud Run's service account needs `roles/storage.objectAdmin` on the bucket.
+
+The bucket stays private. Media is read back through `/api/v1/media/{id}`
+rather than handed out as a public URL — a photo from a disaster scene is
+not something to expose on a guessable link.
+
+`/api/v1/health` reports which backend is live and whether it is durable:
+
+```json
+"media": { "backend": "gcs:avertis-media-nocturne", "durable": true }
+```
+
+> **Caveat worth knowing.** The GCS path is tested against a stubbed client,
+> not against real Cloud Storage — creating buckets in your project was not
+> mine to do. The logic, naming and failure handling are covered, but the
+> first real upload will be the first real upload. Do it before the demo:
+>
+> ```bash
+> curl -X POST $URL/api/v1/media/upload \
+>   -F media_id=med-smoke -F report_id=rpt-smoke \
+>   -F sha256=$(shasum -a 256 some.jpg | cut -d" " -f1) \
+>   -F file=@some.jpg
+> curl -o /tmp/back.jpg $URL/api/v1/media/med-smoke   # should match
+> ```
 
 ### Pointing the simulator at it
 
