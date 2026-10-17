@@ -73,7 +73,10 @@ writing the WHY); it does not pick who gets rescued.
 
 ## 3. The Android app (5 minutes, one phone)
 
-**Download:** `app-arm64-v8a-release.apk` (20 MB) — [link]
+**Download:** `avertis-arm64.apk` (20 MB) — [upload to Drive and put the
+link here]
+
+For an older 32-bit phone, use `avertis-arm32.apk` (18 MB) instead.
 
 Open the file on an Android phone and allow installation from unknown
 sources when asked. It is signed with debug keys, as hackathon builds

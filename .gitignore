@@ -32,3 +32,6 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 backend/out/
+
+# Built APKs for distribution — large binaries, rebuilt on demand
+dist/
