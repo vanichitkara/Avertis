@@ -122,6 +122,9 @@ cd mobile && flutter test
   packet. Emulators have no BLE, so this cannot be closed without hardware —
   it is the one gap that only handsets can close.
 - Everything on my teammate's side, and the integration against it
+Live command centre: https://avertis-687930058257.asia-south1.run.app
+
+For judges, see `docs/for-judges.md`.
 For the pitch and submission text, see `docs/overview.md`.
 
 To deploy, see `docs/deployment.md`.

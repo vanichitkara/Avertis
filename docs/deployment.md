@@ -68,11 +68,44 @@ gcloud run deploy avertis \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
+  --memory 1Gi \
   --set-env-vars "GEMINI_API_KEY=$(grep '^GEMINI_API_KEY=' backend/.env | cut -d= -f2-)" \
   --set-env-vars "GEMINI_MODEL=gemini-3.8-flash"
 ```
 
-First deploy asks to enable Cloud Build and Artifact Registry; say yes.
+**Live service:** <https://avertis-687930058257.asia-south1.run.app>
+
+First deploy needs three APIs enabled (`run`, `cloudbuild`,
+`artifactregistry`) and, on a new project, the default compute service
+account needs build permissions — without them the build fails with
+`PERMISSION_DENIED … could not resolve source`:
+
+```bash
+SA=687930058257-compute@developer.gserviceaccount.com
+for ROLE in roles/cloudbuild.builds.builder roles/storage.objectAdmin \
+            roles/logging.logWriter roles/artifactregistry.writer; do
+  gcloud projects add-iam-policy-binding gen-lang-client-0373165899 \
+    --member="serviceAccount:$SA" --role="$ROLE" --condition=None
+done
+```
+
+### The write key
+
+The deployed service sets `AVERTIS_API_KEY`. Reads — the dashboard,
+`/incidents`, `/world`, `/activity`, `/health` — are open, so anyone with
+the link can look. Writes (`/gateway/sync`, `/incident/analyze`,
+`/media/upload`, `/response/recommend`) require the key as `X-Avertis-Key`,
+so a stranger who finds the URL cannot run up Gemini charges.
+
+Read it back when you need it:
+
+```bash
+gcloud run services describe avertis --region asia-south1 \
+  --format='value(spec.template.spec.containers[0].env)' | tr ',' '\n' | grep AVERTIS_API_KEY
+```
+
+Pass it to the simulator with `--api-key`, and into an APK build with
+`--dart-define=AVERTIS_API_KEY=...`.
 
 **On the key.** The command above reads it out of `backend/.env` so it is
 never typed into your shell history. `.dockerignore` excludes `backend/.env`,
