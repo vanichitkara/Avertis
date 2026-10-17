@@ -27,6 +27,18 @@ only**. Every later step assumes you ran it in that terminal.
 > **zsh note.** Quote any URL containing `?` — `curl "http://…?limit=40"`.
 > Unquoted, zsh tries to glob it and the command fails confusingly.
 
+### Free the ports first
+
+A server left running from an earlier session will refuse the next start
+with `[Errno 48] address already in use`, and uvicorn prints that *after*
+"Application startup complete", which reads as if it worked.
+
+```bash
+lsof -ti:8000 -ti:8080 | xargs kill -9 2>/dev/null; true
+```
+
+- [ ] `lsof -ti:8000; lsof -ti:8080` prints nothing.
+
 ---
 
 ## 1. The automated gate (2 minutes)
