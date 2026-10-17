@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "site": "avertis",
+    "public": "hosting-public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": { "serviceId": "avertis", "region": "asia-south1" }
+      }
+    ]
+  }
+}

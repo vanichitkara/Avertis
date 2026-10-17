@@ -1,6 +1,6 @@
 # Avertis — how to try it
 
-**Command centre:** <https://avertis-687930058257.asia-south1.run.app>
+**Command centre:** <https://avertis.web.app>
 
 Nothing to install to see that. The Android app is optional and adds the
 offline half of the story.
@@ -15,7 +15,7 @@ network changes**, not just when the physical situation does.
 
 ## 1. The dashboard (2 minutes, nothing to install)
 
-Open <https://avertis-687930058257.asia-south1.run.app>.
+Open <https://avertis.web.app>.
 
 **Check the badge, top right.** It names the reasoning engine in use. Green
 with a Gemini model means Gemini is live; amber means it has fallen back to

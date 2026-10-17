@@ -294,7 +294,10 @@ def media_fetch(media_id: str):
 def incident_analyze(report: RawReport) -> dict:
     """One raw report in, one structured incident out (plan Phase 4)."""
     incident, fused = coordinator.incidents.ingest(report)
-    coordinator.replan_all()
+    # Only this incident. One report does not change the network, so the
+    # other sixty-nine have nothing new to reason about — and planning them
+    # all took a minute of model calls to answer a single report.
+    coordinator.replan_one(incident.incident_id)
     return {
         "incident": incident.model_dump(mode="json"),
         "fused": fused,

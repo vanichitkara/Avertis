@@ -529,3 +529,40 @@ class TestRecommendationDurability:
         assert fresh.world()["recommendations"], (
             "a restarted service must still show its plans"
         )
+
+
+class TestReplanScope:
+    """One report should not re-plan every incident in the system.
+
+    /incident/analyze was calling replan_all, so answering a single report
+    planned every open incident — seventy of them live, each potentially
+    costing a model call for an explanation. The endpoint took a minute.
+    """
+
+    def test_replanning_one_leaves_the_others_alone(self):
+        reasoner = TestExplanationReuse.CountingReasoner()
+        c = Coordinator(reasoner, MemoryStore())
+        c.ingest_sync(_healthy_mesh())
+
+        # A second, unrelated incident somewhere else entirely.
+        c.ingest_sync(GatewaySyncRequest(
+            gateway_id="gw-02",
+            nodes=[node("far-node", loc=GeoPoint(lat=40.0, lon=-70.0))],
+            incidents=[RawReport(
+                report_id="rpt-far", origin_node="far-node",
+                created_at=T0, priority=Priority.EMERGENCY,
+                location=GeoPoint(lat=40.0, lon=-70.0),
+                text="unrelated fire in another city",
+            )],
+        ))
+        baseline = reasoner.explanations
+
+        first = c.store.list_incidents()[0]
+        c.replan_one(first.incident_id)
+
+        # At most one incident was reconsidered.
+        assert reasoner.explanations - baseline <= 1
+
+    def test_replanning_one_that_does_not_exist_is_harmless(self):
+        c = Coordinator(DeterministicReasoner(), MemoryStore())
+        assert c.replan_one("INC-nope") is False

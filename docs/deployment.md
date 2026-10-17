@@ -73,9 +73,32 @@ gcloud run deploy avertis \
   --set-env-vars "GEMINI_MODEL=gemini-3.8-flash"
 ```
 
-**Live service:** <https://avertis-687930058257.asia-south1.run.app>
+**For people:** <https://avertis.web.app> — short enough for a slide.
+**For machines:** <https://avertis-687930058257.asia-south1.run.app>
 
-### The URL is already stable — use this form
+Both serve the same service. Use the short one anywhere a human reads it;
+use the direct one in APK builds and the simulator, for the reason below.
+
+### The short URL
+
+Firebase Hosting rewrites `avertis.web.app` to the Cloud Run service, so
+there is nothing hosted there and nothing to redeploy when the backend
+changes:
+
+```bash
+firebase deploy --only hosting --project gen-lang-client-0373165899
+```
+
+That only needs re-running if `firebase.json` changes.
+
+**Keep APK builds and the simulator on the direct Cloud Run URL.** Firebase
+Hosting cuts off a rewritten request at 60 seconds, and a sync carrying
+several reports costs a model call each — it will exceed that. The direct
+URL has no such limit, and the service itself allows 300 seconds. Reads go
+through the short URL in about 1.4s against 0.6s direct, which nobody will
+notice on a dashboard.
+
+### The Cloud Run URL is already stable — use this form
 
 Cloud Run gives a service two permanent hostnames, and `gcloud` reports the
 other one, which is confusing the first time you see it:

@@ -171,7 +171,15 @@ class Coordinator:
             ))
 
     def replan_all(self) -> list[str]:
-        """Re-evaluate every open incident. Returns the ones that changed."""
+        """Re-evaluate every open incident. Returns the ones that changed.
+
+        Right after a gateway sync, because a topology change can move the
+        answer for any incident — that is the whole point of the system.
+        For a single new report, use :meth:`replan_one` instead: planning
+        seventy unrelated incidents to answer one report is work nobody
+        asked for, and with a model behind the explanations it took a
+        minute.
+        """
         responders = self.store.list_responders()
         view = self.network_view()
         changed: list[str] = []
@@ -182,6 +190,15 @@ class Coordinator:
             if self._replan(incident, responders, view):
                 changed.append(incident.incident_id)
         return changed
+
+    def replan_one(self, incident_id: str) -> bool:
+        """Plan a single incident. Returns whether the choice changed."""
+        incident = self.store.get_incident(incident_id)
+        if incident is None or incident.status.value == "RESOLVED":
+            return False
+        return self._replan(
+            incident, self.store.list_responders(), self.network_view()
+        )
 
     def _replan(
         self, incident: Incident, responders: list[Responder], view: NetworkView

@@ -1,0 +1,2 @@
+Firebase Hosting needs a public directory. Everything is served by rewriting
+to the Cloud Run service, so nothing is actually hosted here.
