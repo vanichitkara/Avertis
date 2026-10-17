@@ -22,7 +22,15 @@ const API = (() => {
 const POLL_MS = 2000;
 
 const el = (id) => document.getElementById(id);
-const state = { selected: null, whyOpen: false, lastReplan: null };
+const state = {
+  selected: null,
+  whyOpen: false,
+  lastReplan: null,
+  // "all" or "devices". Simulated nodes prove scale that phones cannot;
+  // real handsets prove the radio works. Showing them together without
+  // saying which is which would leave a viewer unable to tell.
+  nodeFilter: "all",
+};
 
 async function get(path) {
   const response = await fetch(`${API}${path}`, { cache: "no-store" });
@@ -48,18 +56,50 @@ function renderHealth(health) {
 }
 
 function renderNetwork(network) {
-  el("net-nodes").textContent = network.nodes_total ?? 0;
-  el("net-reachable").textContent = network.nodes_reachable ?? 0;
+  const all = network.nodes || [];
+  const devices = all.filter((n) => n.source === "DEVICE");
+  const shown = state.nodeFilter === "devices" ? devices : all;
+
+  // The counters describe what is on screen, so they agree with the canvas
+  // rather than contradicting it.
+  const reachable = shown.filter((n) => n.reachable).length;
+  el("net-nodes").textContent = shown.length;
+  el("net-reachable").textContent = reachable;
   // Known but not heard from recently. Shown rather than hidden: an
   // operator should be able to tell a network of 11 live nodes from a
   // network of 1 live node and 10 that have gone quiet.
-  el("net-stale").textContent = network.nodes_stale ?? 0;
+  const shownIds = new Set(shown.map((n) => n.node_id));
+  el("net-stale").textContent = shown.length - reachable;
   el("net-partitions").textContent = network.partitions ?? 0;
-  el("net-gateways").textContent = (network.gateways || []).length;
+  el("net-gateways").textContent = shown.filter(
+    (n) => n.role === "GATEWAY"
+  ).length;
+
+  el("filter-all").className =
+    `chip${state.nodeFilter === "all" ? " chip-on" : ""}`;
+  el("filter-devices").className =
+    `chip${state.nodeFilter === "devices" ? " chip-on" : ""}`;
+  el("filter-devices").textContent = `devices only (${devices.length})`;
 
   const note = el("topology-note");
-  if (!network.nodes || network.nodes.length === 0) {
-    note.textContent = "No topology reported yet.";
+  if (shown.length === 0) {
+    note.textContent =
+      state.nodeFilter === "devices"
+        ? "No real devices have synced yet. Simulated nodes are hidden by " +
+          "this filter."
+        : "No topology reported yet.";
+  } else if (state.nodeFilter === "devices") {
+    // Link and partition counts describe the whole mesh, so quoting them
+    // beside a filtered node count would read as though one device had
+    // six links and sat in two partitions.
+    const deviceLinks = (network.links || []).filter(
+      (l) => shownIds.has(l.a) && shownIds.has(l.b)
+    ).length;
+    note.textContent =
+      `${shown.length} real device(s), ${deviceLinks} link(s) between them. ` +
+      `Whole mesh including simulated nodes: ${all.length} node(s), ` +
+      `${(network.links || []).length} link(s), ` +
+      `${network.partitions ?? 0} partition(s).`;
   } else {
     note.textContent =
       `${network.links.length} link(s), mean stability ` +
@@ -69,9 +109,16 @@ function renderNetwork(network) {
         : " · fully connected") +
       ((network.nodes_stale ?? 0) > 0
         ? ` · ${network.nodes_stale} node(s) not heard from recently`
+        : "") +
+      (state.nodeFilter === "all" && devices.length !== all.length
+        ? ` · ${devices.length} real device(s), ` +
+          `${all.length - devices.length} simulated`
         : "");
   }
-  drawTopology(network);
+  drawTopology({ ...network, nodes: shown,
+    links: (network.links || []).filter(
+      (l) => shownIds.has(l.a) && shownIds.has(l.b)
+    ) });
 }
 
 const PARTITION_COLOURS = [
@@ -380,6 +427,15 @@ async function refresh() {
       `Cannot reach ${API} — ${error.message}. Showing the last known state.`;
   }
 }
+
+el("filter-all").onclick = () => {
+  state.nodeFilter = "all";
+  refresh();
+};
+el("filter-devices").onclick = () => {
+  state.nodeFilter = "devices";
+  refresh();
+};
 
 el("why-button").onclick = () => {
   state.whyOpen = !state.whyOpen;

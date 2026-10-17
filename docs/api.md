@@ -91,10 +91,10 @@ Notes:
     {"report_id": "rpt-1111", "reason": "MALFORMED_LOCATION"}
   ],
   "incidents": [
-    {"report_id": "rpt-8a1f2c", "incident_id": "INC-1042", "fused_into": null}
+    {"report_id": "rpt-8a1f2c", "incident_id": "INC-0001", "fused_into": null}
   ],
   "commands": [
-    {"type": "SYNC_ACK", "report_id": "rpt-8a1f2c", "incident_id": "INC-1042"},
+    {"type": "SYNC_ACK", "report_id": "rpt-8a1f2c", "incident_id": "INC-0001"},
     {"type": "SET_PRIORITY", "report_id": "rpt-1112", "priority": "EMERGENCY"},
     {"type": "REQUEST_MEDIA", "media_id": "med-1"},
     {"type": "BROADCAST", "priority": "OPERATIONAL",

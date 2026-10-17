@@ -23,7 +23,7 @@ Timestamps are **ISO-8601 UTC with `Z` suffix**, millisecond precision:
 `2026-09-06T12:00:00.000Z`.
 
 Identifiers are lowercase, hyphen-namespaced strings: `node-07`, `pkt-9f3a...`,
-`gw-01`, `INC-1042` (incident IDs are uppercase, they come from the backend).
+`gw-01`, `INC-0001` (incident IDs are uppercase, they come from the backend).
 
 ---
 

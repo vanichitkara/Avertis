@@ -351,22 +351,34 @@ class TestIdAllocation:
         assert not (new_ids & existing), "an id was reissued"
         assert len(store.list_incidents()) == 3, "an incident was overwritten"
 
-    def test_nothing_stored_starts_at_the_plan_s_first_id(self):
+    def test_the_first_incident_is_numbered_one(self):
+        # Not 1042. A first incident numbered in the thousands claims a
+        # history the system does not have.
         agent = IncidentAgent(DeterministicReasoner(), MemoryStore())
         incident, _ = agent.ingest(report("rpt-1", "flooded bridge"))
-        assert incident.incident_id == "INC-1042"
+        assert incident.incident_id == "INC-0001"
+
+    def test_ids_are_padded_so_they_sort(self):
+        store = MemoryStore()
+        agent = IncidentAgent(DeterministicReasoner(), store)
+        for i in range(3):
+            agent.ingest(report(f"rpt-{i}", "fire in the market",
+                                node=f"node-{i}",
+                                loc=GeoPoint(lat=20.0 + i, lon=70.0 + i)))
+        ids = sorted(i.incident_id for i in store.list_incidents())
+        assert ids == ["INC-0001", "INC-0002", "INC-0003"]
 
     def test_an_id_already_taken_is_skipped(self):
         store = MemoryStore()
         # Something else holds the id our counter would hand out next.
-        store.put_incident(Incident(incident_id="INC-1042",
+        store.put_incident(Incident(incident_id="INC-0001",
                                     description="pre-existing"))
 
         agent = IncidentAgent(DeterministicReasoner(), store)
-        agent._counter = itertools.count(1042)   # force the collision
+        agent._counter = itertools.count(1)   # force the collision
         incident, _ = agent.ingest(
             report("rpt-1", "unrelated fire", loc=FAR, node="node-09")
         )
 
-        assert incident.incident_id != "INC-1042"
-        assert store.get_incident("INC-1042").description == "pre-existing"
+        assert incident.incident_id != "INC-0001"
+        assert store.get_incident("INC-0001").description == "pre-existing"

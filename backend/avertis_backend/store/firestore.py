@@ -22,6 +22,7 @@ from ..models import (
     Incident,
     LinkSnapshot,
     NodeSnapshot,
+    NodeSource,
     Responder,
     utcnow,
 )
@@ -72,6 +73,7 @@ class FirestoreStore(Store):
         gateway_id: str,
         nodes: list[NodeSnapshot],
         links: list[LinkSnapshot],
+        source: NodeSource | None = None,
     ) -> None:
         # Delete this gateway's previous view, then write the new one. A link
         # that is absent from the new view has gone away, and leaving it
@@ -91,9 +93,10 @@ class FirestoreStore(Store):
             batch.set(
                 self._db.collection("nodes").document(node.node_id),
                 {
-                    **node.model_copy(
-                        update={"received_at": stamped}
-                    ).model_dump(mode="json"),
+                    **node.model_copy(update={
+                        "received_at": stamped,
+                        "source": source or NodeSource.UNKNOWN,
+                    }).model_dump(mode="json"),
                     "reported_by": gateway_id,
                 },
             )

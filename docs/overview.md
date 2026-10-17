@@ -103,12 +103,12 @@ When the relay recovers, it switches back.
 That whole loop is observable in the command centre's activity feed:
 
 ```
-RECOMMENDATION      resp-a for INC-1042 (100% reliability, 200 m)
+RECOMMENDATION      resp-a for INC-0001 (100% reliability, 200 m)
 PARTITION DETECTED  network split into 3 partitions (was 1)
-RECOMMENDATION      resp-b for INC-1042 (70% reliability, 300 m)
-RESPONSE REPLANNED  INC-1042: resp-a → resp-b
+RECOMMENDATION      resp-b for INC-0001 (70% reliability, 300 m)
+RESPONSE REPLANNED  INC-0001: resp-a → resp-b
 PARTITION HEALED    network rejoined into 1 partition(s)
-RESPONSE REPLANNED  INC-1042: resp-b → resp-a
+RESPONSE REPLANNED  INC-0001: resp-b → resp-a
 ```
 
 Reproduce with:

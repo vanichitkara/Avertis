@@ -208,6 +208,10 @@ class GatewayClient:
             "gateway_id": self.gateway_id,
             "sent_at": iso(self.world.now()),
             "connectivity_window_seconds": round(window_seconds, 1),
+            # Declared, not inferred: the command centre must be able to
+            # tell simulated nodes from real handsets, and a guess based on
+            # id format would break the moment either side renamed.
+            "source": "SIMULATED",
             "nodes": [],
             "links": [],
             "incidents": [],

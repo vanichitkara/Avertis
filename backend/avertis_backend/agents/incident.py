@@ -45,7 +45,14 @@ class IncidentAgent:
         # flood rescue, replaced by an unrelated fire, with no error.
         self._counter: itertools.count | None = None
 
-    FIRST_ID = 1042  # the plan's example starts here
+    #: Incidents are numbered from one, zero-padded so they sort.
+    #:
+    #: An earlier version started at 1042, copied from an illustrative id in
+    #: the project plan. That implies a thousand incidents came before, on a
+    #: system whose first incident it is — inventing a history it does not
+    #: have, to anyone who reads the number.
+    FIRST_ID = 1
+    ID_WIDTH = 4
 
     def _seed_counter(self) -> itertools.count:
         highest = self.FIRST_ID - 1
@@ -63,7 +70,7 @@ class IncidentAgent:
         # between our seeding and now. Overwriting someone's incident is bad
         # enough to be worth the lookup.
         for _ in range(1000):
-            candidate = f"INC-{next(self._counter)}"
+            candidate = f"INC-{next(self._counter):0{self.ID_WIDTH}d}"
             if self.store.get_incident(candidate) is None:
                 return candidate
         raise RuntimeError("could not allocate an unused incident id")

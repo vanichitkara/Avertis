@@ -47,9 +47,9 @@ Scroll to **AI activity** and look for this sequence:
 RECOMMENDATION      resp-a …  (100% reliability, 200 m)
 PARTITION DETECTED  network split into 3 partitions
 RECOMMENDATION      resp-b …  (70% reliability, 300 m)
-RESPONSE REPLANNED  INC-1042: resp-a → resp-b
+RESPONSE REPLANNED  INC-0001: resp-a → resp-b
 PARTITION HEALED    network rejoined into 1 partition
-RESPONSE REPLANNED  INC-1042: resp-b → resp-a
+RESPONSE REPLANNED  INC-0001: resp-b → resp-a
 ```
 
 What happened: a relay node failed. **Nothing physical changed** — responder

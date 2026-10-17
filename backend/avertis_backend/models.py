@@ -47,6 +47,20 @@ _PRIORITY_RANK = {
 }
 
 
+class NodeSource(str, Enum):
+    """Where a node's state came from.
+
+    Declared by the client rather than inferred from the node id. A guess
+    based on naming would quietly misclassify the moment either side
+    changed its id format, and the whole point of this field is that an
+    operator can trust the distinction.
+    """
+
+    DEVICE = "DEVICE"        # a real handset running the app
+    SIMULATED = "SIMULATED"  # the disaster simulator
+    UNKNOWN = "UNKNOWN"      # a client that did not say
+
+
 class NodeRole(str, Enum):
     SURVIVOR = "SURVIVOR"
     RESPONDER = "RESPONDER"
@@ -141,6 +155,12 @@ class NodeSnapshot(BaseModel):
     #: the backend observed itself.
     received_at: datetime | None = None
 
+    #: Set server-side from the sync that carried this node, so a dashboard
+    #: can tell a real handset from a simulated one. Without it both look
+    #: identical, and nobody watching can tell which half of the demo they
+    #: are being shown.
+    source: NodeSource = NodeSource.UNKNOWN
+
 
 class LinkSnapshot(BaseModel):
     a: str
@@ -158,6 +178,11 @@ class SyncMetrics(BaseModel):
 
 class GatewaySyncRequest(BaseModel):
     gateway_id: str
+
+    #: What kind of client this is. Optional, defaulting to UNKNOWN rather
+    #: than guessing — a wrong guess here is worse than an honest "not
+    #: stated".
+    source: NodeSource = NodeSource.UNKNOWN
     sent_at: datetime | None = None
     connectivity_window_seconds: float = 0.0
     nodes: list[NodeSnapshot] = Field(default_factory=list)

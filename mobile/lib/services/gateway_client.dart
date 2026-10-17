@@ -198,6 +198,10 @@ class GatewayClient {
 
     final body = <String, dynamic>{
       'gateway_id': engine.nodeId,
+      // This is a real handset. The command centre uses this to separate
+      // devices from simulated nodes, so nobody watching has to guess
+      // which half of the demo they are looking at.
+      'source': 'DEVICE',
       'sent_at': isoOf(DateTime.now().toUtc()),
       'connectivity_window_seconds':
           double.parse(windowSeconds.toStringAsFixed(1)),

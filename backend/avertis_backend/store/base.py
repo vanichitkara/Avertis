@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models import AgentActivity, Incident, LinkSnapshot, NodeSnapshot, Responder
+from ..models import (
+    AgentActivity,
+    Incident,
+    LinkSnapshot,
+    NodeSnapshot,
+    NodeSource,
+    Responder,
+)
 
 
 class Store(ABC):
@@ -38,6 +45,7 @@ class Store(ABC):
         gateway_id: str,
         nodes: list[NodeSnapshot],
         links: list[LinkSnapshot],
+        source: "NodeSource | None" = None,
     ) -> None:
         """Install one gateway's current view of the mesh, replacing its last.
 

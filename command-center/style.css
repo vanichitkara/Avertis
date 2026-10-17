@@ -139,6 +139,18 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
 
 /* -- stats -- */
 
+.node-filter { display: flex; gap: 6px; margin-bottom: 12px; }
+.chip {
+  font-size: 11px; padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--outline);
+}
+.chip:hover { color: var(--text); }
+.chip-on {
+  color: var(--mesh); border-color: var(--mesh);
+  background: rgba(61,165,255,0.10);
+}
+
 .stat-row { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 14px; }
 .stat { display: flex; flex-direction: column; }
 .stat .n { font-size: 25px; font-weight: 700; line-height: 1.1; }

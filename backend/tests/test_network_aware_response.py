@@ -452,3 +452,46 @@ class TestStaleNodes:
         assert summary["nodes_total"] == 2
         assert summary["nodes_reachable"] == 1
         assert summary["nodes_stale"] == 1
+
+
+class TestNodeProvenance:
+    """A handset and a simulated node must be distinguishable.
+
+    Shown identically, a dashboard cannot say which half of the demo it is
+    displaying, and nobody watching can tell either.
+    """
+
+    def test_the_source_is_recorded_from_the_sync(self):
+        from avertis_backend.models import NodeSource
+
+        store = MemoryStore()
+        store.replace_network("gw-sim", [node("a"), node("b")], [],
+                              source=NodeSource.SIMULATED)
+        store.replace_network("phone-1", [node("n123")], [],
+                              source=NodeSource.DEVICE)
+
+        by_id = {n.node_id: n for n in store.list_nodes()}
+        assert by_id["a"].source == NodeSource.SIMULATED
+        assert by_id["n123"].source == NodeSource.DEVICE
+
+    def test_a_client_that_does_not_say_is_unknown_not_guessed(self):
+        from avertis_backend.models import NodeSource
+
+        store = MemoryStore()
+        store.replace_network("gw", [node("a")], [])
+        # Guessing from the id would misclassify the moment either side
+        # changed its naming.
+        assert store.list_nodes()[0].source == NodeSource.UNKNOWN
+
+    def test_the_summary_counts_devices_separately(self, coordinator):
+        from avertis_backend.models import NodeSource
+
+        coordinator.store.replace_network(
+            "gw-sim", [node("a"), node("b")], [], source=NodeSource.SIMULATED)
+        coordinator.store.replace_network(
+            "phone", [node("n123")], [], source=NodeSource.DEVICE)
+
+        summary = coordinator.network_view().summary()
+        assert summary["nodes_total"] == 3
+        assert summary["nodes_device"] == 1
+        assert summary["nodes_by_source"]["SIMULATED"] == 2

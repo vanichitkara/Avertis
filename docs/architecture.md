@@ -91,7 +91,7 @@ re-plans on it.
 3. packet multi-hops; each hop dedups, decrements TTL, appends path
 4. gateway node receives it, queues it for sync
 5. connectivity window opens → critical-first sync → backend
-6. Gemini structures + fuses → INC-1042
+6. Gemini structures + fuses → INC-0001
 7. Response Agent picks responder A (close, well connected)
 8. simulator kills relay R7
 9. mesh detects DOWN → partition → re-elects relay → emits events

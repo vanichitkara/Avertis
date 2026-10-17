@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avertis Command Centre</title>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -70,6 +70,10 @@
 
     <section class="panel">
       <h2>Network</h2>
+      <div class="node-filter">
+        <button id="filter-all" class="chip chip-on">all nodes</button>
+        <button id="filter-devices" class="chip">devices only</button>
+      </div>
       <div class="stat-row">
         <div class="stat"><span id="net-nodes" class="n">0</span><span class="t">nodes</span></div>
         <div class="stat"><span id="net-reachable" class="n">0</span><span class="t">reachable</span></div>
@@ -110,6 +114,6 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

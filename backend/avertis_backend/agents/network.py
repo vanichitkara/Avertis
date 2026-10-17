@@ -170,6 +170,20 @@ class NetworkView:
     def stale_count(self) -> int:
         return len(self.stale)
 
+    def count_by_source(self) -> dict[str, int]:
+        """How many nodes came from handsets versus the simulator."""
+        counts: dict[str, int] = {}
+        for node in self.nodes.values():
+            key = node.source.value if node.source else "UNKNOWN"
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    def device_count(self) -> int:
+        return sum(
+            1 for n in self.nodes.values()
+            if n.source and n.source.value == "DEVICE"
+        )
+
     def summary(self) -> dict:
         return {
             "nodes_total": len(self.nodes),
@@ -177,6 +191,9 @@ class NetworkView:
             # Known, but not heard from recently enough to count as part of
             # the live network.
             "nodes_stale": self.stale_count(),
+            # So a dashboard can say which half of the demo it is showing.
+            "nodes_by_source": self.count_by_source(),
+            "nodes_device": self.device_count(),
             "partitions": self.partition_count,
             "gateways": self.gateways,
             # Named link_count, not links: /api/v1/world puts the actual

@@ -89,7 +89,8 @@ class Coordinator:
         # absent link means the link is gone, and that is how a dead relay
         # reaches the Response Agent at all.
         self.store.replace_network(
-            request.gateway_id, request.nodes, request.links
+            request.gateway_id, request.nodes, request.links,
+            source=request.source,
         )
 
         # Any responder-role node is a responder we can dispatch. The mesh is

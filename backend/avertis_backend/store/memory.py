@@ -14,6 +14,7 @@ from ..models import (
     Incident,
     LinkSnapshot,
     NodeSnapshot,
+    NodeSource,
     Responder,
     utcnow,
 )
@@ -65,8 +66,16 @@ class MemoryStore(Store):
         gateway_id: str,
         nodes: list[NodeSnapshot],
         links: list[LinkSnapshot],
+        source: NodeSource | None = None,
     ) -> None:
-        stamped = [n.model_copy(update={"received_at": utcnow()}) for n in nodes]
+        now = utcnow()
+        stamped = [
+            n.model_copy(update={
+                "received_at": now,
+                "source": source or NodeSource.UNKNOWN,
+            })
+            for n in nodes
+        ]
         with self._lock:
             self._nodes_by_gateway[gateway_id] = {n.node_id: n for n in stamped}
             self._links_by_gateway[gateway_id] = {
