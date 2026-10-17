@@ -13,6 +13,7 @@ in every gateway sync and answers the one question the Response Agent needs:
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime, timedelta, timezone
 
 from ..models import LinkSnapshot, NodeSnapshot
 
@@ -21,14 +22,41 @@ from ..models import LinkSnapshot, NodeSnapshot
 # on.
 USABLE_LINK_STABILITY = 0.35
 
+#: How long a node stays part of the live network after its last sync.
+#:
+#: A node is only re-reported when its gateway next syncs, and a gateway in
+#: a disaster may only get a window every few minutes — so this is generous.
+#: But it has to exist: without it, every node that ever synced counts
+#: forever. A dashboard claiming eleven reachable nodes when one phone is
+#: switched on tells an operator the network is healthy when it is gone,
+#: and offers the Response Agent responders who left hours ago.
+STALE_AFTER = timedelta(minutes=15)
+
 
 class NetworkView:
     """A queryable snapshot of the mesh at one moment."""
 
     def __init__(
-        self, nodes: list[NodeSnapshot], links: list[LinkSnapshot]
+        self,
+        nodes: list[NodeSnapshot],
+        links: list[LinkSnapshot],
+        now: datetime | None = None,
     ) -> None:
-        self.nodes = {n.node_id: n for n in nodes}
+        now = now or datetime.now(timezone.utc)
+
+        # A node not heard from recently is still *known* — it is in the
+        # list, and the operator can see it — but it is not reachable, and
+        # it does not count towards the health of the live network.
+        self.stale: set[str] = set()
+        adjusted: list[NodeSnapshot] = []
+        for node in nodes:
+            if _is_stale(node, now):
+                self.stale.add(node.node_id)
+                adjusted.append(node.model_copy(update={"reachable": False}))
+            else:
+                adjusted.append(node)
+
+        self.nodes = {n.node_id: n for n in adjusted}
         self.links = links
 
         self._adjacency: dict[str, dict[str, float]] = {n: {} for n in self.nodes}
@@ -139,10 +167,16 @@ class NetworkView:
     def reachable_count(self) -> int:
         return sum(1 for n in self.nodes.values() if n.reachable)
 
+    def stale_count(self) -> int:
+        return len(self.stale)
+
     def summary(self) -> dict:
         return {
             "nodes_total": len(self.nodes),
             "nodes_reachable": self.reachable_count(),
+            # Known, but not heard from recently enough to count as part of
+            # the live network.
+            "nodes_stale": self.stale_count(),
             "partitions": self.partition_count,
             "gateways": self.gateways,
             # Named link_count, not links: /api/v1/world puts the actual
@@ -164,3 +198,19 @@ class NetworkAgent:
         self, nodes: list[NodeSnapshot], links: list[LinkSnapshot]
     ) -> NetworkView:
         return NetworkView(nodes, links)
+
+
+def _is_stale(node: NodeSnapshot, now: datetime) -> bool:
+    """Has this node gone quiet?
+
+    Judged on when the backend received the snapshot, never on the node's
+    own `last_seen` — that comes off a device clock which may be wrong,
+    unset, or simulated. A node with no receipt stamp predates this check
+    and is treated as stale rather than assumed live.
+    """
+    if node.received_at is None:
+        return True
+    received = node.received_at
+    if received.tzinfo is None:
+        received = received.replace(tzinfo=timezone.utc)
+    return (now - received) > STALE_AFTER

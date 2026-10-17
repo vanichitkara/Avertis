@@ -17,7 +17,14 @@ sends its whole current view, and history lives in the replay log.
 
 from __future__ import annotations
 
-from ..models import AgentActivity, Incident, LinkSnapshot, NodeSnapshot, Responder
+from ..models import (
+    AgentActivity,
+    Incident,
+    LinkSnapshot,
+    NodeSnapshot,
+    Responder,
+    utcnow,
+)
 from .base import Store
 
 try:  # optional dependency; only needed when Firestore is configured
@@ -79,10 +86,16 @@ class FirestoreStore(Store):
             for doc in stale:
                 batch.delete(doc.reference)
 
+        stamped = utcnow()
         for node in nodes:
             batch.set(
                 self._db.collection("nodes").document(node.node_id),
-                {**node.model_dump(mode="json"), "reported_by": gateway_id},
+                {
+                    **node.model_copy(
+                        update={"received_at": stamped}
+                    ).model_dump(mode="json"),
+                    "reported_by": gateway_id,
+                },
             )
         for link in links:
             key = "__".join(sorted((link.a, link.b)))

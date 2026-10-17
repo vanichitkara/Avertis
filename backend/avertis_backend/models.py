@@ -134,6 +134,13 @@ class NodeSnapshot(BaseModel):
     reachable: bool = True
     partition_id: int | None = None
 
+    #: When this backend received the snapshot. Set server-side and never
+    #: read from the request: `last_seen` comes off a device whose clock may
+    #: be wrong, unset, or — in the simulator's case — deliberately
+    #: simulated and weeks adrift. Freshness has to be judged by something
+    #: the backend observed itself.
+    received_at: datetime | None = None
+
 
 class LinkSnapshot(BaseModel):
     a: str

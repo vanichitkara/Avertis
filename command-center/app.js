@@ -50,6 +50,10 @@ function renderHealth(health) {
 function renderNetwork(network) {
   el("net-nodes").textContent = network.nodes_total ?? 0;
   el("net-reachable").textContent = network.nodes_reachable ?? 0;
+  // Known but not heard from recently. Shown rather than hidden: an
+  // operator should be able to tell a network of 11 live nodes from a
+  // network of 1 live node and 10 that have gone quiet.
+  el("net-stale").textContent = network.nodes_stale ?? 0;
   el("net-partitions").textContent = network.partitions ?? 0;
   el("net-gateways").textContent = (network.gateways || []).length;
 
@@ -62,7 +66,10 @@ function renderNetwork(network) {
       `${Math.round((network.mean_link_stability || 0) * 100)}%` +
       (network.partitions > 1
         ? ` · ${network.partitions} partitions — some nodes cannot reach others`
-        : " · fully connected");
+        : " · fully connected") +
+      ((network.nodes_stale ?? 0) > 0
+        ? ` · ${network.nodes_stale} node(s) not heard from recently`
+        : "");
   }
   drawTopology(network);
 }

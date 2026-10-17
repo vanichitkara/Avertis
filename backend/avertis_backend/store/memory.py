@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import threading
 
-from ..models import AgentActivity, Incident, LinkSnapshot, NodeSnapshot, Responder
+from ..models import (
+    AgentActivity,
+    Incident,
+    LinkSnapshot,
+    NodeSnapshot,
+    Responder,
+    utcnow,
+)
 from .base import Store
 
 
@@ -59,8 +66,9 @@ class MemoryStore(Store):
         nodes: list[NodeSnapshot],
         links: list[LinkSnapshot],
     ) -> None:
+        stamped = [n.model_copy(update={"received_at": utcnow()}) for n in nodes]
         with self._lock:
-            self._nodes_by_gateway[gateway_id] = {n.node_id: n for n in nodes}
+            self._nodes_by_gateway[gateway_id] = {n.node_id: n for n in stamped}
             self._links_by_gateway[gateway_id] = {
                 tuple(sorted((l.a, l.b))): l for l in links
             }

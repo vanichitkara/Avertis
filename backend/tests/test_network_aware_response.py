@@ -375,3 +375,80 @@ class TestExplanationReuse:
         lost = ResponderAssessment(responder_id="A", distance_m=200,
                                    network_reliability=0.05, reachable=False)
         assert not _materially_same(before, lost)
+
+
+class TestStaleNodes:
+    """A node that stopped reporting must stop counting as reachable.
+
+    Observed live: the deployed dashboard claimed eleven reachable nodes
+    when one phone was switched on. Seven were simulator nodes from a run
+    weeks earlier and four were wiped app installs. Nothing ever aged them
+    out, so the network looked healthy and far larger than it was — and the
+    Response Agent would happily have dispatched a responder who left
+    hours ago.
+    """
+
+    def _node(self, nid, received_at):
+        return NodeSnapshot(node_id=nid, reachable=True,
+                            received_at=received_at)
+
+    def test_a_recent_node_is_live(self):
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+        view = NetworkView([self._node("fresh", now)], [], now=now)
+
+        assert view.reachable_count() == 1
+        assert view.stale_count() == 0
+
+    def test_a_node_gone_quiet_is_not_reachable(self):
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+        old = now - dt.timedelta(hours=2)
+        view = NetworkView([self._node("gone", old)], [], now=now)
+
+        assert view.reachable_count() == 0
+        assert view.stale_count() == 1
+        # Still listed — an operator should see it existed.
+        assert "gone" in view.nodes
+        assert view.nodes["gone"].reachable is False
+
+    def test_a_node_with_no_receipt_stamp_is_treated_as_stale(self):
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+        view = NetworkView([self._node("unknown", None)], [], now=now)
+
+        # Better to understate the network than to claim a node is live on
+        # no evidence.
+        assert view.stale_count() == 1
+
+    def test_the_device_clock_is_not_trusted(self):
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+
+        # The simulator reports last_seen from a simulated clock weeks
+        # adrift, and a phone may have no clock set at all. Freshness is
+        # judged on when the backend received it.
+        node = NodeSnapshot(
+            node_id="simulated",
+            last_seen=dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc),
+            received_at=now,
+            reachable=True,
+        )
+        view = NetworkView([node], [], now=now)
+        assert view.reachable_count() == 1, (
+            "a wrong device clock must not retire a live node"
+        )
+
+    def test_the_summary_separates_known_from_live(self):
+        import datetime as dt
+        now = dt.datetime.now(dt.timezone.utc)
+        view = NetworkView(
+            [self._node("fresh", now),
+             self._node("gone", now - dt.timedelta(hours=2))],
+            [], now=now,
+        )
+        summary = view.summary()
+
+        assert summary["nodes_total"] == 2
+        assert summary["nodes_reachable"] == 1
+        assert summary["nodes_stale"] == 1
