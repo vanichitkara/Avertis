@@ -126,6 +126,8 @@ For the pitch and submission text, see `docs/overview.md`.
 
 To deploy, see `docs/deployment.md`.
 
+For a manual pass over the app and dashboard, see `docs/qa-script.md`.
+
 Before submitting, work through `docs/pre-submission-checklist.md`.
 
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`

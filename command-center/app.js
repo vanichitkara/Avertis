@@ -365,6 +365,10 @@ async function refresh() {
     // screen looking live.
     link.textContent = "backend unreachable";
     link.className = "badge badge-down";
+    // Clear the engine badge too. Left on "connecting…" it reads like a
+    // first attempt still in progress, and it must never still be claiming
+    // Gemini is live when nothing can be reached.
+    renderHealth(null);
     el("footer-note").textContent =
       `Cannot reach ${API} — ${error.message}. Showing the last known state.`;
   }
