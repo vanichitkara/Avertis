@@ -30,7 +30,15 @@ const state = {
   // real handsets prove the radio works. Showing them together without
   // saying which is which would leave a viewer unable to tell.
   nodeFilter: "all",
+  // Replay position. null means live; otherwise an index into the
+  // chronological activity list, so the operator can wind back through
+  // what happened rather than only seeing the end state.
+  replayIndex: null,
+  activity: [],
+  dispatching: false,
 };
+
+const WRITE_KEY = new URLSearchParams(location.search).get("key") || "";
 
 async function get(path) {
   const response = await fetch(`${API}${path}`, { cache: "no-store" });
@@ -301,6 +309,15 @@ function renderDecision(world) {
       : `${people} affected`);
 
   el("decision-desc").textContent = chosenIncident.description || "(no description)";
+  renderEvidence(chosenIncident);
+
+  // Dispatch state follows the incident, so an already-approved one does
+  // not invite a second approval.
+  const dispatched = chosenIncident.status === "DISPATCHED";
+  el("dispatch-button").disabled = dispatched || state.dispatching;
+  el("dispatch-button").textContent = dispatched
+    ? "DISPATCHED"
+    : "APPROVE & DISPATCH";
 
   const rec = (world.recommendations || {})[chosenIncident.incident_id];
   if (!rec) {
@@ -365,10 +382,142 @@ function renderDecision(world) {
   }
 }
 
+function renderSummary(data) {
+  const panel = el("summary-panel");
+  const text = (data && data.summary) || "";
+  // Hidden rather than showing an empty box before anything has happened.
+  panel.hidden = !text;
+  el("summary-text").textContent = text;
+  // written_by is not always the configured engine — a model call that
+  // times out falls back to the rules, and crediting the model for a
+  // sentence it did not write would be the same misrepresentation the
+  // header badge exists to prevent.
+  const by = data && data.written_by;
+  el("summary-by").textContent = by
+    ? (by === "deterministic"
+        ? "Written by rules — the model did not answer in time"
+        : `Written by ${by}`)
+    : "";
+}
+
+function renderMetrics(m) {
+  el("m-reports").textContent = m.reports_total ?? 0;
+  el("m-incidents").textContent = m.incidents_total ?? 0;
+  el("m-absorbed").textContent = m.duplicate_reports_absorbed ?? 0;
+  el("m-fused").textContent = m.incidents_fused ?? 0;
+  el("m-media").textContent = m.media_stored ?? 0;
+
+  const absorbed = m.duplicate_reports_absorbed ?? 0;
+  el("m-note").textContent = absorbed
+    ? `${m.reports_total} report(s) from the field became ` +
+      `${m.incidents_total} incident(s) — ${absorbed} duplicate account(s) ` +
+      `of events already known, absorbed rather than shown twice.`
+    : "No duplicate reports yet.";
+}
+
+function renderEvidence(incident) {
+  const box = el("evidence");
+  const items = el("evidence-items");
+  items.innerHTML = "";
+
+  // Media descriptors live on the evidence of each source report.
+  const media = (incident.evidence || []).flatMap((e) => e.media || []);
+  box.hidden = media.length === 0;
+
+  for (const m of media) {
+    if ((m.kind || "IMAGE") === "IMAGE") {
+      const link = document.createElement("a");
+      link.href = `${API}/api/v1/media/${m.media_id}`;
+      link.target = "_blank";
+      const img = document.createElement("img");
+      img.src = `${API}/api/v1/media/${m.media_id}`;
+      img.alt = `Evidence ${m.media_id}`;
+      // The record can outlive the file. Say so rather than leaving a
+      // broken image, which reads as a bug rather than missing evidence.
+      img.onerror = () => {
+        link.replaceWith(
+          Object.assign(document.createElement("div"), {
+            className: "audio",
+            textContent: "image not retrievable",
+          })
+        );
+      };
+      link.append(img);
+      items.append(link);
+    } else {
+      const chip = document.createElement("div");
+      chip.className = "audio";
+      chip.textContent = m.duration_s
+        ? `voice ${m.duration_s}s`
+        : "voice report";
+      items.append(chip);
+    }
+  }
+}
+
+async function dispatchSelected() {
+  if (!state.selected || state.dispatching) return;
+  state.dispatching = true;
+  el("dispatch-button").disabled = true;
+  el("dispatch-state").textContent = "approving…";
+
+  try {
+    const response = await fetch(
+      `${API}/api/v1/incidents/${state.selected}/dispatch`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(WRITE_KEY ? { "X-Avertis-Key": WRITE_KEY } : {}),
+        },
+        body: JSON.stringify({ approved_by: "command centre operator" }),
+      }
+    );
+    if (!response.ok) {
+      el("dispatch-state").textContent =
+        response.status === 401
+          ? "needs the write key — open the dashboard with ?key=…"
+          : `could not approve (${response.status})`;
+      return;
+    }
+    const body = await response.json();
+    el("dispatch-state").textContent =
+      `dispatched ${body.responder_id} at ` +
+      new Date(body.approved_at).toLocaleTimeString();
+  } catch (error) {
+    el("dispatch-state").textContent = "could not reach the backend";
+  } finally {
+    state.dispatching = false;
+    el("dispatch-button").disabled = false;
+    refresh();
+  }
+}
+
 function renderActivity(data) {
   const feed = el("activity-feed");
   feed.innerHTML = "";
-  for (const entry of data.activity || []) {
+
+  // The API returns newest first; replay reads naturally oldest-first.
+  const chronological = [...(data.activity || [])].reverse();
+  state.activity = chronological;
+
+  const slider = el("replay-slider");
+  slider.max = String(Math.max(0, chronological.length - 1));
+  const live = state.replayIndex === null;
+  if (live) slider.value = slider.max;
+
+  const upTo = live ? chronological.length : state.replayIndex + 1;
+  const visible = chronological.slice(0, upTo).reverse();
+
+  el("replay-live").className = `chip${live ? " chip-on" : ""}`;
+  el("replay-at").textContent = live
+    ? "following live"
+    : chronological[state.replayIndex]
+      ? `at ${new Date(chronological[state.replayIndex].at)
+          .toLocaleTimeString()} · ${upTo}/${chronological.length}`
+      : "";
+
+  for (const entry of visible) {
     const li = document.createElement("li");
 
     const time = document.createElement("span");
@@ -396,12 +545,19 @@ function renderActivity(data) {
 async function refresh() {
   const link = el("link-badge");
   try {
-    const [health, world, incidents, activity] = await Promise.all([
+    const [health, world, incidents, activity, metrics] = await Promise.all([
       get("/api/v1/health"),
       get("/api/v1/world"),
       get("/api/v1/incidents"),
-      get("/api/v1/activity?limit=40"),
+      get("/api/v1/activity?limit=60"),
+      get("/api/v1/metrics"),
     ]);
+
+    // The summary is fetched separately and never awaited here. On a cache
+    // miss it costs a model call — measured at 14 seconds — and inside the
+    // batch above that left the whole dashboard blank for the duration,
+    // which reads as a broken page rather than a pending sentence.
+    void get("/api/v1/summary").then(renderSummary).catch(() => {});
 
     link.textContent = `backend up · ${world.network.nodes_total} nodes`;
     link.className = "badge badge-model";
@@ -411,6 +567,7 @@ async function refresh() {
     renderIncidents(incidents);
     renderDecision(world);
     renderActivity(activity);
+    renderMetrics(metrics);
 
     el("footer-note").textContent =
       `${API} · store ${health.store} · updated ${new Date().toLocaleTimeString()}`;
@@ -427,6 +584,21 @@ async function refresh() {
       `Cannot reach ${API} — ${error.message}. Showing the last known state.`;
   }
 }
+
+el("dispatch-button").onclick = dispatchSelected;
+
+el("replay-slider").oninput = (event) => {
+  const index = Number(event.target.value);
+  // Dragging to the end means "follow live" again, which is what a
+  // scrubber at its right-hand stop should mean.
+  state.replayIndex =
+    index >= state.activity.length - 1 ? null : index;
+  refresh();
+};
+el("replay-live").onclick = () => {
+  state.replayIndex = null;
+  refresh();
+};
 
 el("filter-all").onclick = () => {
   state.nodeFilter = "all";

@@ -211,6 +211,38 @@ canvas {
 .activity .action.PARTITION_HEALED   { color: var(--online); }
 .activity .action.REPORTS_FUSED      { color: var(--operational); }
 
+.summary { margin: 0 0 6px; line-height: 1.6; }
+
+.decision-actions { display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap; }
+.dispatch {
+  background: var(--online); color: #05241c; border: none;
+  border-radius: 8px; padding: 9px 18px;
+  font-size: 12px; font-weight: 700; letter-spacing: 1.1px; cursor: pointer;
+}
+.dispatch:hover { filter: brightness(1.08); }
+.dispatch:disabled { opacity: 0.45; cursor: default; filter: none; }
+
+.evidence { margin-top: 14px; }
+.evidence .label {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.evidence-items { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.evidence-items a { display: block; }
+.evidence-items img {
+  width: 96px; height: 96px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--outline);
+}
+.evidence-items .audio {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--outline); color: var(--text-dim); font-size: 12px;
+}
+
+.replay { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.replay input[type="range"] { flex: 1; accent-color: var(--mesh); }
+
 .empty, .muted { color: var(--text-dim); }
 .small { font-size: 11px; }
 footer { padding: 14px 20px; border-top: 1px solid var(--outline); }

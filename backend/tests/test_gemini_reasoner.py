@@ -315,3 +315,40 @@ class TestSeverityIsNeverTalkedDown:
         )
         out = r.structure_report(report("there is a fire in the market"))
         assert out["severity"] == Priority.EMERGENCY
+
+
+class TestSummaryProvenance:
+    """The summary must say who actually wrote it.
+
+    A model call that times out falls back to the rule-based sentence.
+    Observed live: the dashboard printed "69 open incident(s), 34
+    life-critical" — plainly the rules — under the caption "Written by
+    gemini". Crediting the model for a sentence it did not write is the
+    same misrepresentation the engine badge exists to prevent.
+    """
+
+    def test_a_model_summary_is_credited_to_the_model(self):
+        r = reasoner_with("Thirty people are trapped across two sites.")
+        text, by = r.summarize([incident()])
+
+        assert text.startswith("Thirty people")
+        assert by == "gemini:stub-model"
+
+    def test_a_fallback_is_credited_to_the_rules(self):
+        r = reasoner_with(RuntimeError("504 deadline exceeded"))
+        text, by = r.summarize([incident()])
+
+        assert by == "deterministic", "the model did not write this"
+        assert "open incident" in text
+
+    def test_an_empty_response_is_not_credited_to_the_model(self):
+        r = reasoner_with(None)
+        _, by = r.summarize([incident()])
+        assert by == "deterministic"
+
+    def test_no_incidents_needs_no_model_call(self):
+        r = reasoner_with()
+        text, by = r.summarize([])
+        assert text == "No open incidents."
+        assert by == "deterministic"
+        assert r._client.models.calls == []

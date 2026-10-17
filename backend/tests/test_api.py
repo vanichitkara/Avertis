@@ -19,8 +19,9 @@ from avertis_backend.main import app, coordinator, store
 @pytest.fixture
 def client() -> TestClient:
     # Each test starts from a clean world.
+    # Recommendations live in the store now, so resetting it clears them
+    # too — which is the point: they survive a restart in production.
     store.__init__()  # type: ignore[misc]
-    coordinator._recommendations.clear()
     return TestClient(app)
 
 
@@ -250,3 +251,121 @@ class TestReasoningDisclosure:
         body = client.get("/api/v1/health").json()
         if body["reasoning"]["engine"] == "deterministic":
             assert body["reasoning"]["is_model"] is False
+
+
+class TestDispatchApproval:
+    """Plan §39: the system recommends, a person dispatches.
+
+    Until this endpoint existed that was a claim with nothing behind it —
+    every recommendation said "requires human approval" and there was no
+    way to approve one.
+    """
+
+    def _an_incident(self, client):
+        client.post("/api/v1/gateway/sync", json=SYNC_BODY)
+        return client.get("/api/v1/incidents").json()["incidents"][0][
+            "incident_id"
+        ]
+
+    def test_approving_records_who_and_marks_it_dispatched(self, client):
+        incident_id = self._an_incident(client)
+
+        response = client.post(
+            f"/api/v1/incidents/{incident_id}/dispatch",
+            json={"responder_id": "resp-a", "approved_by": "Vani"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "DISPATCHED"
+        assert body["approved_by"] == "Vani"
+        assert body["approved_at"]
+
+        # The incident itself carries the new status.
+        detail = client.get(f"/api/v1/incidents/{incident_id}").json()
+        assert detail["incident"]["status"] == "DISPATCHED"
+
+    def test_the_approval_is_in_the_activity_feed(self, client):
+        incident_id = self._an_incident(client)
+        client.post(f"/api/v1/incidents/{incident_id}/dispatch",
+                    json={"responder_id": "resp-a", "approved_by": "Vani"})
+
+        feed = client.get("/api/v1/activity").json()["activity"]
+        approvals = [a for a in feed if a["action"] == "DISPATCH_APPROVED"]
+        assert approvals, "a dispatch must be auditable"
+        assert "Vani" in approvals[0]["detail"]
+
+    def test_an_unknown_incident_is_a_404(self, client):
+        assert client.post("/api/v1/incidents/INC-nope/dispatch",
+                           json={}).status_code == 404
+
+    def test_approving_with_no_responder_at_all_is_refused(self, client):
+        incident_id = self._an_incident(client)
+        # No responders have ever synced, so there is nothing to dispatch
+        # and nothing was recommended.
+        response = client.post(
+            f"/api/v1/incidents/{incident_id}/dispatch", json={})
+        assert response.status_code == 400
+
+
+class TestSummaryCaching:
+    def test_the_summary_is_not_recomputed_on_every_poll(self, client):
+        client.post("/api/v1/gateway/sync", json=SYNC_BODY)
+
+        first = client.get("/api/v1/summary").json()
+        second = client.get("/api/v1/summary").json()
+
+        # Each recomputation costs a model call, and the dashboard polls.
+        assert first["generated_at"] == second["generated_at"]
+        assert first["summary"] == second["summary"]
+
+
+class TestEvidenceLinking:
+    """An uploaded file has to reach the incident it belongs to.
+
+    Descriptors and bytes travel separately and in either order: the mesh
+    carries the descriptor when a report syncs, the bytes follow when a
+    connectivity window is wide enough. Observed live: a photo uploaded
+    and verified byte-for-byte, attached to nothing, and invisible on the
+    dashboard.
+    """
+
+    def _photo(self, client, report_id, media_id="med-x"):
+        payload = b"\x89PNG\r\n\x1a\n" + b"pretend image" * 4
+        return client.post(
+            "/api/v1/media/upload",
+            data={"media_id": media_id, "report_id": report_id,
+                  "sha256": hashlib.sha256(payload).hexdigest()},
+            files={"file": ("scene.png", payload, "image/png")},
+        )
+
+    def test_an_upload_attaches_to_its_incident(self, client):
+        client.post("/api/v1/gateway/sync", json=SYNC_BODY)
+        report_id = SYNC_BODY["incidents"][0]["report_id"]
+
+        response = self._photo(client, report_id)
+        assert response.status_code == 200
+        assert response.json()["attached_to"].startswith("INC-")
+
+        incident = client.get("/api/v1/incidents").json()["incidents"][0]
+        media = [m for e in incident["evidence"] for m in e["media"]]
+        assert [m["media_id"] for m in media] == ["med-x"]
+        assert media[0]["kind"] == "IMAGE"
+
+    def test_uploading_twice_does_not_duplicate_the_descriptor(self, client):
+        client.post("/api/v1/gateway/sync", json=SYNC_BODY)
+        report_id = SYNC_BODY["incidents"][0]["report_id"]
+
+        self._photo(client, report_id)
+        self._photo(client, report_id)
+
+        incident = client.get("/api/v1/incidents").json()["incidents"][0]
+        media = [m for e in incident["evidence"] for m in e["media"]]
+        assert len(media) == 1
+
+    def test_an_orphan_upload_is_still_stored(self, client):
+        # The bytes may arrive before the report that references them.
+        response = self._photo(client, "rpt-not-seen-yet", "med-orphan")
+        assert response.status_code == 200
+        assert response.json()["attached_to"] is None
+        # And are still retrievable.
+        assert client.get("/api/v1/media/med-orphan").status_code == 200

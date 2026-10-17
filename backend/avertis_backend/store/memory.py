@@ -15,6 +15,7 @@ from ..models import (
     LinkSnapshot,
     NodeSnapshot,
     NodeSource,
+    Recommendation,
     Responder,
     utcnow,
 )
@@ -35,6 +36,7 @@ class MemoryStore(Store):
         self._nodes_by_gateway: dict[str, dict[str, NodeSnapshot]] = {}
         self._links_by_gateway: dict[str, dict[tuple[str, str], LinkSnapshot]] = {}
         self._responders: dict[str, Responder] = {}
+        self._recommendations: dict[str, Recommendation] = {}
         self._activity: list[AgentActivity] = []
         self._media: dict[str, dict] = {}
 
@@ -95,6 +97,18 @@ class MemoryStore(Store):
             for view in self._links_by_gateway.values():
                 merged.update(view)
             return list(merged.values())
+
+    def put_recommendation(self, rec: Recommendation) -> None:
+        with self._lock:
+            self._recommendations[rec.incident_id] = rec
+
+    def get_recommendation(self, incident_id: str) -> Recommendation | None:
+        with self._lock:
+            return self._recommendations.get(incident_id)
+
+    def list_recommendations(self) -> dict[str, Recommendation]:
+        with self._lock:
+            return dict(self._recommendations)
 
     def put_responder(self, responder: Responder) -> None:
         with self._lock:

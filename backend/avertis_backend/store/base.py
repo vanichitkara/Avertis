@@ -14,6 +14,7 @@ from ..models import (
     LinkSnapshot,
     NodeSnapshot,
     NodeSource,
+    Recommendation,
     Responder,
 )
 
@@ -64,6 +65,23 @@ class Store(ABC):
 
     @abstractmethod
     def list_links(self) -> list[LinkSnapshot]: ...
+
+    # -- recommendations --
+    @abstractmethod
+    def put_recommendation(self, rec: "Recommendation") -> None:
+        """Persist the current plan for an incident.
+
+        Incidents survived restarts while recommendations did not, so a
+        scaled-to-zero service came back with a full incident list and an
+        empty decision panel — the signature feature invisible, and
+        nothing to approve.
+        """
+
+    @abstractmethod
+    def get_recommendation(self, incident_id: str) -> "Recommendation | None": ...
+
+    @abstractmethod
+    def list_recommendations(self) -> dict[str, "Recommendation"]: ...
 
     # -- responders --
     @abstractmethod

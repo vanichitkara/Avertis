@@ -11,6 +11,7 @@ import hashlib
 import logging
 import os
 import pathlib
+from datetime import timedelta
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,9 +26,12 @@ from .config import (
     load_settings,
 )
 from .models import (
+    AgentActivity,
     GatewayCommand,
     GatewaySyncRequest,
     GatewaySyncResponse,
+    IncidentStatus,
+    MediaDescriptor,
     RawReport,
     RejectedReport,
     ReportOutcome,
@@ -209,7 +213,49 @@ async def media_upload(
         "durable": media_storage.durable,
     }
     store.put_media(media_id, descriptor)
-    return {"media_id": media_id, "uri": stored.uri}
+
+    # Attach it to the incident this report became, so the command centre
+    # can actually show it. Bytes and descriptors arrive by different
+    # routes and in either order — the mesh carries the descriptor when a
+    # report syncs, the bytes follow when a window is wide enough — so the
+    # link has to be made whichever lands second. Without this the file is
+    # stored, verified, and invisible.
+    linked_to = store.incident_for_report(report_id)
+    if linked_to:
+        incident = store.get_incident(linked_to)
+        if incident is not None:
+            for evidence in incident.evidence:
+                if evidence.report_id != report_id:
+                    continue
+                known = {m.media_id for m in evidence.media}
+                if media_id not in known:
+                    evidence.media.append(MediaDescriptor(
+                        kind=_kind_for(file.content_type),
+                        media_id=media_id,
+                        sha256=digest,
+                        bytes=stored.bytes,
+                        inline=False,
+                        uri=stored.uri,
+                    ))
+                    incident.updated_at = utcnow()
+                    store.put_incident(incident)
+                break
+
+    return {
+        "media_id": media_id,
+        "uri": stored.uri,
+        "attached_to": linked_to,
+    }
+
+
+def _kind_for(content_type: str | None) -> str:
+    if not content_type:
+        return "FILE"
+    if content_type.startswith("image/"):
+        return "IMAGE"
+    if content_type.startswith("audio/"):
+        return "AUDIO"
+    return "FILE"
 
 
 @app.get("/api/v1/media/{media_id}")
@@ -302,7 +348,7 @@ def recommend(body: dict) -> dict:
         incident, store.list_responders(), coordinator.network_view()
     )
     recommendation = coordinator.safety.review(incident, recommendation)
-    coordinator._recommendations[incident_id] = recommendation
+    store.put_recommendation(recommendation)
     return recommendation.model_dump(mode="json")
 
 
@@ -325,9 +371,97 @@ def activity(limit: int = 100) -> dict:
     }
 
 
+#: The summary costs a model call, and the dashboard polls. Without a cache
+#: that is one Gemini request every couple of seconds, forever, for a
+#: sentence that changes only when the incidents do.
+_summary_cache: dict = {
+    "text": None, "at": None, "fingerprint": None, "by": None,
+}
+SUMMARY_TTL = timedelta(seconds=90)
+
+
 @app.get("/api/v1/summary")
 def summary() -> dict:
-    return {"summary": coordinator.summary(), "reasoned_by": reasoner.name}
+    incidents = store.list_incidents()
+    # Recompute when the picture changes, or when the cached one is old.
+    fingerprint = (
+        len(incidents),
+        tuple(sorted((i.incident_id, i.severity.value, i.status.value)
+                     for i in incidents)),
+    )
+    now = utcnow()
+    fresh = (
+        _summary_cache["text"] is not None
+        and _summary_cache["fingerprint"] == fingerprint
+        and _summary_cache["at"] is not None
+        and now - _summary_cache["at"] < SUMMARY_TTL
+    )
+    if not fresh:
+        text, written_by = coordinator.summary()
+        _summary_cache["text"] = text
+        _summary_cache["by"] = written_by
+        _summary_cache["at"] = now
+        _summary_cache["fingerprint"] = fingerprint
+
+    return {
+        "summary": _summary_cache["text"],
+        # Who wrote this sentence, which is not always the configured
+        # engine: a model call that times out falls back to the rules.
+        "written_by": _summary_cache["by"],
+        "engine": reasoner.name,
+        "generated_at": iso(_summary_cache["at"]),
+    }
+
+
+@app.post(
+    "/api/v1/incidents/{incident_id}/dispatch",
+    dependencies=[Depends(require_key)],
+)
+def dispatch(incident_id: str, body: dict) -> dict:
+    """Record a human approving a recommendation.
+
+    Plan §39: the system recommends, a person dispatches. Until now that
+    was a sentence in the docs and a flag on the response — there was no
+    way for anyone to actually approve anything, which makes the
+    human-in-the-loop claim unverifiable.
+
+    This does not send anyone anywhere. It records who approved what, so
+    the decision has an owner and an audit trail.
+    """
+    incident = store.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="unknown incident_id")
+
+    recommendation = coordinator.recommendation_for(incident_id)
+    responder = body.get("responder_id") or (
+        recommendation.recommended_responder if recommendation else None
+    )
+    if not responder:
+        raise HTTPException(
+            status_code=400,
+            detail="no responder to dispatch and none recommended",
+        )
+
+    approved_by = (body.get("approved_by") or "command centre").strip()[:80]
+
+    incident.status = IncidentStatus.DISPATCHED
+    incident.updated_at = utcnow()
+    store.put_incident(incident)
+
+    store.append_activity(AgentActivity(
+        agent="operator",
+        action="DISPATCH_APPROVED",
+        detail=f"{incident_id}: {responder} approved by {approved_by}",
+        incident_id=incident_id,
+    ))
+
+    return {
+        "incident_id": incident_id,
+        "status": incident.status.value,
+        "responder_id": responder,
+        "approved_by": approved_by,
+        "approved_at": iso(incident.updated_at),
+    }
 
 
 @app.get("/api/v1/metrics")

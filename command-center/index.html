@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avertis Command Centre</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -23,6 +23,12 @@
 <!-- Plan §29: the dashboard must not be only a map. The decision panel is
      the differentiator, so it sits at the top. -->
 <main>
+
+  <section id="summary-panel" class="panel" hidden>
+    <h2>Situation summary</h2>
+    <p id="summary-text" class="summary"></p>
+    <span id="summary-by" class="muted small"></span>
+  </section>
 
   <section id="decision-panel" class="panel">
     <h2>Operational decision</h2>
@@ -58,8 +64,17 @@
         </div>
       </div>
 
-      <button id="why-button" class="why">WHY?</button>
+      <div class="decision-actions">
+        <button id="why-button" class="why">WHY?</button>
+        <button id="dispatch-button" class="dispatch">APPROVE &amp; DISPATCH</button>
+        <span id="dispatch-state" class="muted small"></span>
+      </div>
       <div id="why-text" class="why-text" hidden></div>
+
+      <div id="evidence" class="evidence" hidden>
+        <span class="label">Evidence</span>
+        <div id="evidence-items" class="evidence-items"></div>
+      </div>
 
       <div id="decision-flags" class="flags"></div>
       <div id="decision-alternatives" class="alternatives"></div>
@@ -103,7 +118,25 @@
   </div>
 
   <section class="panel">
+    <h2>Resilience</h2>
+    <div class="stat-row">
+      <div class="stat"><span id="m-reports" class="n">0</span><span class="t">reports received</span></div>
+      <div class="stat"><span id="m-incidents" class="n">0</span><span class="t">incidents</span></div>
+      <div class="stat"><span id="m-absorbed" class="n">0</span><span class="t">duplicates absorbed</span></div>
+      <div class="stat"><span id="m-fused" class="n">0</span><span class="t">fused incidents</span></div>
+      <div class="stat"><span id="m-media" class="n">0</span><span class="t">evidence files</span></div>
+    </div>
+    <p id="m-note" class="muted small"></p>
+  </section>
+
+  <section class="panel">
     <h2>AI activity</h2>
+    <div class="replay">
+      <button id="replay-live" class="chip chip-on">live</button>
+      <input id="replay-slider" type="range" min="0" max="0" value="0"
+             aria-label="Replay position">
+      <span id="replay-at" class="muted small"></span>
+    </div>
     <p class="muted small" id="activity-note"></p>
     <ul id="activity-feed" class="activity"></ul>
   </section>
@@ -114,6 +147,6 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

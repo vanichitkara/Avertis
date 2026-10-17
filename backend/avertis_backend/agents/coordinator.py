@@ -44,8 +44,9 @@ class Coordinator:
         self.response = ResponseAgent(reasoner, store)
         self.safety = SafetyAgent(store)
 
-        # Latest recommendation per incident, so a change can be detected.
-        self._recommendations: dict[str, Recommendation] = {}
+        # Recommendations live in the store, not in this process: Cloud Run
+        # scales to zero, and a decision panel that empties on restart
+        # while the incidents remain is worse than useless.
 
     # -- world model -------------------------------------------------------
 
@@ -74,7 +75,7 @@ class Coordinator:
             },
             "recommendations": {
                 incident_id: rec.model_dump(mode="json")
-                for incident_id, rec in self._recommendations.items()
+                for incident_id, rec in self.store.list_recommendations().items()
             },
             "reasoned_by": self.reasoner.name,
         }
@@ -185,20 +186,20 @@ class Coordinator:
     def _replan(
         self, incident: Incident, responders: list[Responder], view: NetworkView
     ) -> bool:
-        previous = self._recommendations.get(incident.incident_id)
+        previous = self.store.get_recommendation(incident.incident_id)
         fresh = self.response.recommend(
             incident, responders, view, previous=previous
         )
         fresh = self.safety.review(incident, fresh)
 
         if previous is None:
-            self._recommendations[incident.incident_id] = fresh
+            self.store.put_recommendation(fresh)
             return False  # first plan is not a *change*
 
         same = previous.recommended_responder == fresh.recommended_responder
         if same:
             # Keep the newer assessment figures, but it is not a change.
-            self._recommendations[incident.incident_id] = fresh
+            self.store.put_recommendation(fresh)
             return False
 
         # Only switch if the new choice is clearly better, so the
@@ -210,7 +211,7 @@ class Coordinator:
         if new_score < old_score + REPLAN_MARGIN:
             return False
 
-        self._recommendations[incident.incident_id] = fresh
+        self.store.put_recommendation(fresh)
         self.store.append_activity(AgentActivity(
             agent=self.name,
             action="RESPONSE_REPLANNED",
@@ -237,7 +238,8 @@ class Coordinator:
         return 0.0  # no longer a candidate at all
 
     def recommendation_for(self, incident_id: str) -> Recommendation | None:
-        return self._recommendations.get(incident_id)
+        return self.store.get_recommendation(incident_id)
 
-    def summary(self) -> str:
+    def summary(self) -> tuple[str, str]:
+        """Returns (text, written_by)."""
         return self.reasoner.summarize(self.store.list_incidents())

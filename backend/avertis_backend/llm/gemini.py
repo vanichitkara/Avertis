@@ -266,20 +266,32 @@ class GeminiReasoner(Reasoner):
             return self._fallback.explain_choice(incident, chosen, alternatives)
         return text
 
-    def summarize(self, incidents: list[Incident]) -> str:
+    def summarize(self, incidents: list[Incident]) -> tuple[str, str]:
         if not incidents:
-            return "No open incidents."
+            return "No open incidents.", "deterministic"
+        # Deliberately few, and truncated. A forty-incident prompt took
+        # longer than the request timeout and fell back to the rule-based
+        # sentence every time — so the model never actually wrote the
+        # summary it exists to write. The most severe ones carry the
+        # picture anyway.
+        ordered = sorted(incidents, key=lambda i: (i.severity.rank,
+                                                   i.created_at))
         lines = "\n".join(
-            f"- {i.incident_id} {i.severity.value} {i.type.value}: "
-            f"{i.description[:120]}"
-            for i in incidents[:40]
+            f"- {i.severity.value} {i.type.value}: {i.description[:80]}"
+            for i in ordered[:12]
         )
         text = self._ask_text(
-            "Summarise the current operational picture for a command-centre "
-            "operator in two or three sentences. Use only these incidents, "
-            "and do not invent figures.\n\n" + lines
+            "Summarise the operational picture for a command-centre "
+            "operator in two or three sentences. Use only what is listed "
+            "and do not invent figures. There are "
+            f"{len(incidents)} open incidents in total; the most severe "
+            "are:\n\n" + lines
         )
-        return text or super().summarize(incidents)
+        if not text:
+            # The model did not answer in time. Say so rather than
+            # presenting the fallback as its work.
+            return super().summarize(incidents)
+        return text, self.name
 
 
 def _fmt_point(point: Any) -> str:

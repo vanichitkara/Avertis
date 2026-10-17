@@ -61,13 +61,20 @@ class Reasoner(ABC):
         Must be grounded in the assessments given. Never invent telemetry.
         """
 
-    def summarize(self, incidents: list[Incident]) -> str:
-        """An operational summary. Optional; default is a plain count."""
+    def summarize(self, incidents: list[Incident]) -> tuple[str, str]:
+        """An operational summary, with who actually wrote it.
+
+        Returns (text, written_by). The second value matters: a model call
+        can fail and fall back to this default, and crediting the model for
+        a sentence it did not write is the same misrepresentation as
+        labelling any other rule output as model output.
+        """
         if not incidents:
-            return "No open incidents."
+            return "No open incidents.", "deterministic"
         critical = sum(1 for i in incidents if i.severity.name == "LIFE_CRITICAL")
         return (
-            f"{len(incidents)} open incident(s), {critical} life-critical."
+            f"{len(incidents)} open incident(s), {critical} life-critical.",
+            "deterministic",
         )
 
 

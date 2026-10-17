@@ -495,3 +495,37 @@ class TestNodeProvenance:
         assert summary["nodes_total"] == 3
         assert summary["nodes_device"] == 1
         assert summary["nodes_by_source"]["SIMULATED"] == 2
+
+
+class TestRecommendationDurability:
+    """Recommendations must outlive the process that made them.
+
+    Cloud Run scales to zero. Observed live: incidents persisted, the
+    decision panel came back empty, and an approved dispatch was refused
+    with "none recommended" while the activity feed plainly showed the
+    recommendation that had been made.
+    """
+
+    def test_a_recommendation_survives_a_new_coordinator(self):
+        store = MemoryStore()
+        first = Coordinator(DeterministicReasoner(), store)
+        first.ingest_sync(_healthy_mesh())
+        incident_id = store.list_incidents()[0].incident_id
+        chosen = first.recommendation_for(incident_id).recommended_responder
+
+        # The process restarts; the store does not.
+        restarted = Coordinator(DeterministicReasoner(), store)
+        recovered = restarted.recommendation_for(incident_id)
+
+        assert recovered is not None, "the decision panel would be empty"
+        assert recovered.recommended_responder == chosen
+
+    def test_the_world_model_reads_recommendations_from_the_store(self):
+        store = MemoryStore()
+        c = Coordinator(DeterministicReasoner(), store)
+        c.ingest_sync(_healthy_mesh())
+
+        fresh = Coordinator(DeterministicReasoner(), store)
+        assert fresh.world()["recommendations"], (
+            "a restarted service must still show its plans"
+        )

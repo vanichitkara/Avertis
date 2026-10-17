@@ -23,6 +23,7 @@ from ..models import (
     LinkSnapshot,
     NodeSnapshot,
     NodeSource,
+    Recommendation,
     Responder,
     utcnow,
 )
@@ -119,6 +120,22 @@ class FirestoreStore(Store):
             LinkSnapshot(**_strip(doc.to_dict()))
             for doc in self._db.collection("links").stream()
         ]
+
+    def put_recommendation(self, rec: Recommendation) -> None:
+        self._db.collection("recommendations").document(rec.incident_id).set(
+            rec.model_dump(mode="json")
+        )
+
+    def get_recommendation(self, incident_id: str) -> Recommendation | None:
+        snap = (self._db.collection("recommendations")
+                .document(incident_id).get())
+        return Recommendation(**snap.to_dict()) if snap.exists else None
+
+    def list_recommendations(self) -> dict[str, Recommendation]:
+        return {
+            doc.id: Recommendation(**doc.to_dict())
+            for doc in self._db.collection("recommendations").stream()
+        }
 
     def put_responder(self, responder: Responder) -> None:
         self._db.collection("responders").document(responder.responder_id).set(
