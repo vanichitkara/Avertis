@@ -26,5 +26,9 @@ mobile/android/app/build/
 
 # Backend
 backend/.venv/
+# Any .env variant may hold a real key — a backup copy leaks just as badly
+# as the original. The example template is the one deliberate exception.
 backend/.env
+backend/.env.*
+!backend/.env.example
 backend/out/
