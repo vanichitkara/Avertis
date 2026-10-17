@@ -52,10 +52,17 @@ The `Dockerfile` is at the **repository root**, not in `backend/`, because the
 image needs both directories. Deploying from `backend/` would produce an API
 with no dashboard and no error saying so.
 
+> **Billing must be enabled on the project.** Cloud Run and Cloud Storage both
+> require it, free tier included. The Avertis project
+> (`gen-lang-client-0373165899`) had no billing account attached until one was
+> linked; without it, bucket creation fails with *"The billing account for the
+> owning project is disabled in state absent"* and `gcloud run deploy` fails
+> similarly.
+
 ```bash
 cd ~/Documents/Avertis
 
-gcloud config set project nocturne-502617
+gcloud config set project gen-lang-client-0373165899
 
 gcloud run deploy avertis \
   --source . \
@@ -101,7 +108,7 @@ to zero or restarts** — which it will, between a rehearsal and the real demo.
 gcloud firestore databases create --location=asia-south1
 
 gcloud run services update avertis --region asia-south1 \
-  --set-env-vars FIRESTORE_PROJECT=nocturne-502617
+  --set-env-vars FIRESTORE_PROJECT=gen-lang-client-0373165899
 ```
 
 Cloud Run's service account needs `roles/datastore.user`. On a personal
@@ -134,11 +141,11 @@ Cloud Run discards that on restart and does not share it between instances,
 so an incident record ends up pointing at evidence that no longer exists.
 
 ```bash
-gcloud storage buckets create gs://avertis-media-nocturne \
+gcloud storage buckets create gs://avertis-media-0373165899 \
   --location=asia-south1 --uniform-bucket-level-access
 
 gcloud run services update avertis --region asia-south1 \
-  --set-env-vars STORAGE_BUCKET=avertis-media-nocturne
+  --set-env-vars STORAGE_BUCKET=avertis-media-0373165899
 ```
 
 Cloud Run's service account needs `roles/storage.objectAdmin` on the bucket.
@@ -150,21 +157,37 @@ not something to expose on a guessable link.
 `/api/v1/health` reports which backend is live and whether it is durable:
 
 ```json
-"media": { "backend": "gcs:avertis-media-nocturne", "durable": true }
+"media": { "backend": "gcs:avertis-media-0373165899", "durable": true }
 ```
 
-> **Caveat worth knowing.** The GCS path is tested against a stubbed client,
-> not against real Cloud Storage — creating buckets in your project was not
-> mine to do. The logic, naming and failure handling are covered, but the
-> first real upload will be the first real upload. Do it before the demo:
->
-> ```bash
-> curl -X POST $URL/api/v1/media/upload \
->   -F media_id=med-smoke -F report_id=rpt-smoke \
->   -F sha256=$(shasum -a 256 some.jpg | cut -d" " -f1) \
->   -F file=@some.jpg
-> curl -o /tmp/back.jpg $URL/api/v1/media/med-smoke   # should match
-> ```
+The bucket `gs://avertis-media-0373165899` already exists in
+`gen-lang-client-0373165899` (asia-south1, uniform access) and has been
+verified: an 89 KB photo uploaded through the API, read back byte-identical,
+and still there after a backend restart. Seven integration tests run against
+it on demand:
+
+```bash
+cd backend
+AVERTIS_TEST_BUCKET=avertis-media-0373165899 \
+  .venv/bin/python -m pytest tests/test_gcs_integration.py -q
+```
+
+They are skipped unless that variable is set, so the default suite stays
+hermetic and costs nothing.
+
+### If Google APIs reject everything
+
+```
+User project specified in the request is invalid.
+```
+
+The application-default credentials carry a `quota_project_id` that no longer
+exists — this happened here, pointing at a deleted project, and it fails
+every Google API call including Firestore:
+
+```bash
+gcloud auth application-default set-quota-project gen-lang-client-0373165899
+```
 
 ### Pointing the simulator at it
 
