@@ -139,6 +139,26 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
 
 /* -- stats -- */
 
+.stat.dispatched .n { color: var(--online); }
+
+.search {
+  width: 100%; box-sizing: border-box; margin-bottom: 10px;
+  padding: 9px 12px; border-radius: 8px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--outline); font-size: 13px;
+}
+.search:focus { outline: none; border-color: var(--mesh); }
+.search::placeholder { color: var(--text-dim); }
+
+.filter-row {
+  display: flex; gap: 6px; align-items: center;
+  flex-wrap: wrap; margin-bottom: 8px;
+}
+.filter-label {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-dim); margin-right: 4px; min-width: 58px;
+}
+
 .node-filter { display: flex; gap: 6px; margin-bottom: 12px; }
 .chip {
   font-size: 11px; padding: 4px 11px; border-radius: 999px; cursor: pointer;
@@ -181,6 +201,12 @@ canvas {
 .activity::-webkit-scrollbar-thumb {
   background: var(--outline); border-radius: 4px;
 }
+
+.incident-list .filter-note {
+  padding: 6px 0; border-top: none;
+  color: var(--text-dim); font-size: 11px; cursor: default;
+}
+.incident-list .filter-note:hover { background: transparent; }
 
 .incident-list li {
   padding: 9px 0; border-top: 1px solid var(--outline);

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avertis Command Centre</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 
@@ -110,6 +110,26 @@
         <div class="stat emer"><span id="inc-emer" class="n">0</span><span class="t">emergency</span></div>
         <div class="stat oper"><span id="inc-oper" class="n">0</span><span class="t">operational</span></div>
         <div class="stat"><span id="inc-norm" class="n">0</span><span class="t">normal</span></div>
+        <div class="stat dispatched"><span id="inc-dispatched" class="n">0</span><span class="t">dispatched</span></div>
+      </div>
+
+      <input id="incident-search" class="search" type="search"
+             placeholder="Search incidents — bridge, trapped, INC-0004…"
+             aria-label="Search incidents">
+
+      <div class="filter-row">
+        <span class="filter-label">Severity</span>
+        <button class="chip chip-on" data-sev="ALL">all</button>
+        <button class="chip" data-sev="LIFE_CRITICAL">life critical</button>
+        <button class="chip" data-sev="EMERGENCY">emergency</button>
+        <button class="chip" data-sev="OPERATIONAL">operational</button>
+        <button class="chip" data-sev="NORMAL">normal</button>
+      </div>
+      <div class="filter-row">
+        <span class="filter-label">Status</span>
+        <button class="chip chip-on" data-status="ALL">all</button>
+        <button class="chip" data-status="OPEN">awaiting dispatch</button>
+        <button class="chip" data-status="DISPATCHED">dispatched</button>
       </div>
       <p class="muted small" id="fusion-note"></p>
       <ul id="incident-list" class="incident-list"></ul>
@@ -147,6 +167,6 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

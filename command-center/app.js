@@ -36,7 +36,106 @@ const state = {
   replayIndex: null,
   activity: [],
   dispatching: false,
+  search: "",
+  severity: "ALL",
+  status: "ALL",
+  // The last payload, kept so filtering and replay redraw from memory.
+  // Re-fetching five endpoints on every keystroke made typing feel like
+  // the page was struggling, for work that is entirely local.
+  last: null,
 };
+
+/// Redraw from what was last fetched, without touching the network.
+function rerender() {
+  if (!state.last) return;
+  const { health, world, incidents, activity, metrics } = state.last;
+  renderHealth(health);
+  renderNetwork(world.network);
+  renderIncidents(incidents);
+  renderDecision(world);
+  renderActivity(activity);
+  renderMetrics(metrics);
+}
+
+/// Damerau-Levenshtein distance, bounded so a long word cannot cost much.
+///
+/// Damerau rather than plain Levenshtein because it counts a transposition
+/// as one edit, not two. "brigde" for "bridge" is the single most common
+/// way people mistype, and under plain Levenshtein it sits two edits away
+/// and finds nothing — a search an operator stops trusting after once.
+function withinEditDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return false;
+
+  let twoBack = null;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        previous[j] + 1,        // deletion
+        current[j - 1] + 1,     // insertion
+        previous[j - 1] + cost  // substitution
+      );
+      if (
+        i > 1 && j > 1 &&
+        a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]
+      ) {
+        current[j] = Math.min(current[j], twoBack[j - 2] + 1); // transposition
+      }
+      best = Math.min(best, current[j]);
+    }
+    if (best > max) return false;   // no path back under the limit
+    twoBack = previous;
+    previous = current;
+  }
+  return previous[b.length] <= max;
+}
+
+/// Does this incident match what was typed?
+///
+/// Three passes, cheapest first: the whole phrase as a substring, then
+/// every word present somewhere, thenevery word within a typo of some word in
+/// the text. Short words are matched exactly, because one edit on a
+/// three-letter token matches almost anything.
+function matchesSearch(incident, query) {
+  if (!query) return true;
+
+  const haystack = [
+    incident.incident_id,
+    incident.type,
+    incident.severity,
+    incident.status,
+    incident.description,
+    ...(incident.evidence || []).map((e) => e.excerpt || ""),
+    ...(incident.evidence || []).map((e) => e.origin_node || ""),
+  ].join(" ").toLowerCase().replace(/_/g, " ");
+
+  const q = query.toLowerCase().trim();
+  if (haystack.includes(q)) return true;
+
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.every((t) => haystack.includes(t))) return true;
+
+  const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
+  return tokens.every((token) => {
+    if (haystack.includes(token)) return true;
+    if (token.length < 4) return false;
+    const tolerance = token.length >= 7 ? 2 : 1;
+    return words.some((word) => withinEditDistance(token, word, tolerance));
+  });
+}
+
+function visibleIncidents(incidents) {
+  return incidents.filter(
+    (i) =>
+      (state.severity === "ALL" || i.severity === state.severity) &&
+      (state.status === "ALL" || i.status === state.status) &&
+      matchesSearch(i, state.search)
+  );
+}
 
 const WRITE_KEY = new URLSearchParams(location.search).get("key") || "";
 
@@ -233,6 +332,22 @@ function renderIncidents(data) {
   el("inc-norm").textContent = counts.NORMAL || 0;
 
   const incidents = data.incidents || [];
+  // Counted across everything, not the filtered view: these are the
+  // headline figures for the whole situation, and a filter narrowing them
+  // would make the operator think incidents had gone away.
+  el("inc-dispatched").textContent = incidents.filter(
+    (i) => i.status === "DISPATCHED"
+  ).length;
+
+  for (const button of document.querySelectorAll("[data-sev]")) {
+    button.className =
+      `chip${button.dataset.sev === state.severity ? " chip-on" : ""}`;
+  }
+  for (const button of document.querySelectorAll("[data-status]")) {
+    button.className =
+      `chip${button.dataset.status === state.status ? " chip-on" : ""}`;
+  }
+
   const fused = incidents.filter((i) => i.evidence.length > 1);
   const absorbed = fused.reduce((sum, i) => sum + i.evidence.length - 1, 0);
   el("fusion-note").textContent = absorbed
@@ -241,7 +356,22 @@ function renderIncidents(data) {
 
   const list = el("incident-list");
   list.innerHTML = "";
-  for (const incident of incidents) {
+
+  const shown = visibleIncidents(incidents);
+  const filtering =
+    state.search || state.severity !== "ALL" || state.status !== "ALL";
+
+  if (filtering) {
+    const note = document.createElement("li");
+    note.className = "filter-note";
+    note.textContent = shown.length
+      ? `Showing ${shown.length} of ${incidents.length}`
+      : `Nothing matches. ${incidents.length} incident(s) hidden by the ` +
+        `current filters.`;
+    list.append(note);
+  }
+
+  for (const incident of shown) {
     const li = document.createElement("li");
     if (incident.incident_id === state.selected) li.className = "selected";
 
@@ -279,10 +409,16 @@ function severityColour(severity) {
 }
 
 function renderDecision(world) {
-  const incidents = world.physical.incidents || [];
+  // Follow the filters: showing a decision for an incident the operator
+  // has just filtered out reads as the panel ignoring them.
+  const all = world.physical.incidents || [];
+  const incidents = visibleIncidents(all);
   if (incidents.length === 0) {
     el("decision").hidden = true;
     el("decision-empty").hidden = false;
+    el("decision-empty").textContent = all.length
+      ? "No incident matches the current filters."
+      : "No incidents yet. Waiting for a gateway sync.";
     return;
   }
 
@@ -562,12 +698,8 @@ async function refresh() {
     link.textContent = `backend up · ${world.network.nodes_total} nodes`;
     link.className = "badge badge-model";
 
-    renderHealth(health);
-    renderNetwork(world.network);
-    renderIncidents(incidents);
-    renderDecision(world);
-    renderActivity(activity);
-    renderMetrics(metrics);
+    state.last = { health, world, incidents, activity, metrics };
+    rerender();
 
     el("footer-note").textContent =
       `${API} · store ${health.store} · updated ${new Date().toLocaleTimeString()}`;
@@ -585,6 +717,17 @@ async function refresh() {
   }
 }
 
+el("incident-search").oninput = (event) => {
+  state.search = event.target.value;
+  rerender();
+};
+for (const button of document.querySelectorAll("[data-sev]")) {
+  button.onclick = () => { state.severity = button.dataset.sev; rerender(); };
+}
+for (const button of document.querySelectorAll("[data-status]")) {
+  button.onclick = () => { state.status = button.dataset.status; rerender(); };
+}
+
 el("dispatch-button").onclick = dispatchSelected;
 
 el("replay-slider").oninput = (event) => {
@@ -593,20 +736,20 @@ el("replay-slider").oninput = (event) => {
   // scrubber at its right-hand stop should mean.
   state.replayIndex =
     index >= state.activity.length - 1 ? null : index;
-  refresh();
+  rerender();
 };
 el("replay-live").onclick = () => {
   state.replayIndex = null;
-  refresh();
+  rerender();
 };
 
 el("filter-all").onclick = () => {
   state.nodeFilter = "all";
-  refresh();
+  rerender();
 };
 el("filter-devices").onclick = () => {
   state.nodeFilter = "devices";
-  refresh();
+  rerender();
 };
 
 el("why-button").onclick = () => {
