@@ -127,6 +127,7 @@ For the pitch and submission text, see `docs/overview.md`.
 To deploy, see `docs/deployment.md`.
 
 For a manual pass over the app and dashboard, see `docs/qa-script.md`.
+For two physical phones, see `docs/two-phone-testing.md`.
 
 Before submitting, work through `docs/pre-submission-checklist.md`.
 

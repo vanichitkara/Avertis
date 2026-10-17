@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY.
+
+  Gradle gives src/debug/res priority over src/main/res, so this replaces the
+  strict configuration for debug builds and leaves release builds alone.
+
+  During development the backend is a laptop on the same Wi-Fi, reached over
+  plain HTTP at whatever address DHCP handed it today. Listing that address
+  in the main config would mean editing a tracked file every time it
+  changes, and would risk shipping it. Permitting cleartext for debug builds
+  only keeps the release build strict — see
+  src/main/res/xml/network_security_config.xml, which permits cleartext for
+  nothing but the emulator's loopback and refuses it everywhere else.
+
+  A release APK talking to Cloud Run uses HTTPS and needs none of this.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

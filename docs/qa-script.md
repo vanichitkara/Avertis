@@ -15,23 +15,42 @@ cosmetic.
 
 ## Setup
 
+> **`source tool/env.sh` in every terminal you open.** It only affects the
+> shell it is run in, so a second terminal will not have `flutter`, `adb` or
+> `emulator` and will fail with `command not found`. Each block below starts
+> with it for that reason.
+>
+> Each block also starts from the repository root. If you are already
+> somewhere inside the project, `cd ~/Documents/Avertis` first — a bare
+> `cd mobile` fails when you are already in `mobile/`.
+
+Free the ports (a server left over from an earlier session refuses the next
+start with `address already in use`):
+
 ```bash
 cd ~/Documents/Avertis
 lsof -ti:8000 -ti:8080 | xargs kill -9 2>/dev/null; true
-source tool/env.sh
 ```
 
-Terminal 1 — backend (also serves the command centre):
+**Terminal 1** — backend, which also serves the command centre:
 
 ```bash
+cd ~/Documents/Avertis && source tool/env.sh
 cd backend && .venv/bin/python -m uvicorn avertis_backend.main:app --port 8000
 ```
 
-Terminal 2 — emulator and app:
+**Terminal 2** — emulator:
 
 ```bash
-emulator -avd avertis_test -no-snapshot-load &
+cd ~/Documents/Avertis && source tool/env.sh
+emulator -avd avertis_test -no-snapshot-load -no-audio &
 adb wait-for-device
+```
+
+**Terminal 3** — the app, and everything else you run during QA:
+
+```bash
+cd ~/Documents/Avertis && source tool/env.sh
 cd mobile && flutter run --dart-define=AVERTIS_API_BASE=http://10.0.2.2:8000
 ```
 
@@ -171,6 +190,9 @@ Negative cases:
 - [ ] `adb shell am force-stop …` then reopen — custody survives.
 
 ---
+
+> For two physical phones and the BLE bring-up, see
+> `docs/two-phone-testing.md`. The sections above all run on the emulator.
 
 # Part B — The command centre
 
