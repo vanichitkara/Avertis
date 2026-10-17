@@ -3,7 +3,7 @@
 Status: **frozen**. This is the contract between my side (mobile gateway client
 + simulator gateway client) and my teammate's FastAPI backend.
 
-Base URL: `${AVERTIS_API_BASE}` (e.g. `https://avertis-api-xxxx.run.app`)
+Base URL: `${AVERTIS_API_BASE}` (e.g. `https://avertis-687930058257.asia-south1.run.app`)
 All paths are prefixed `/api/v1`.
 
 Auth (MVP): `X-Avertis-Key: <shared key>` header. Not a security claim — it

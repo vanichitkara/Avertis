@@ -38,7 +38,7 @@ Any static host works — Firebase Hosting, Netlify, GitHub Pages. The page
 then needs to be told where the API is, because the origins differ:
 
 ```
-https://your-host/index.html?api=https://avertis-xxxx.run.app
+https://your-host/index.html?api=https://avertis-687930058257.asia-south1.run.app
 ```
 
 The backend already sends permissive CORS headers, so this works, but it is
@@ -74,6 +74,27 @@ gcloud run deploy avertis \
 ```
 
 **Live service:** <https://avertis-687930058257.asia-south1.run.app>
+
+### The URL is already stable — use this form
+
+Cloud Run gives a service two permanent hostnames, and `gcloud` reports the
+other one, which is confusing the first time you see it:
+
+| Form | Example | Derived from |
+|---|---|---|
+| **project number** (use this) | `avertis-687930058257.asia-south1.run.app` | service name + project number + region |
+| legacy hash | `avertis-ynpx4oum5a-el.a.run.app` | an identifier tied to this particular service |
+
+Both route to the same service and both have served every revision. Neither
+changes when you redeploy — eighteen revisions in, both still answer.
+
+Prefer the **project-number** form everywhere, including in APK builds. It is
+derived only from values you control, so it survives even deleting and
+recreating the service under the same name. The hash form would not.
+
+The URL only changes if you rename the service, move region, or move project.
+If you ever do, every APK goes stale: the backend URL is compiled in, so the
+app would keep calling an address that no longer exists.
 
 First deploy needs three APIs enabled (`run`, `cloudbuild`,
 `artifactregistry`) and, on a new project, the default compute service
@@ -150,7 +171,7 @@ gcloud run services describe avertis --region asia-south1 \
 Check it:
 
 ```bash
-curl -s https://avertis-xxxx.run.app/api/v1/health | python3 -m json.tool
+curl -s https://avertis-687930058257.asia-south1.run.app/api/v1/health | python3 -m json.tool
 ```
 
 - `status: ok`
@@ -253,7 +274,7 @@ gcloud auth application-default set-quota-project gen-lang-client-0373165899
 
 ```bash
 cd simulator
-.venv/bin/python -m avertis_sim run relay_failure --api https://avertis-xxxx.run.app
+.venv/bin/python -m avertis_sim run relay_failure --api https://avertis-687930058257.asia-south1.run.app
 ```
 
 ---
@@ -268,7 +289,7 @@ source tool/env.sh
 
 cd mobile
 flutter build apk --release \
-  --dart-define=AVERTIS_API_BASE=https://avertis-xxxx.run.app
+  --dart-define=AVERTIS_API_BASE=https://avertis-687930058257.asia-south1.run.app
 ```
 
 Output: `build/app/outputs/flutter-apk/app-release.apk` (~57 MB).
@@ -286,7 +307,7 @@ channels or the Drift database.
 
 ```bash
 flutter build apk --release --split-per-abi \
-  --dart-define=AVERTIS_API_BASE=https://avertis-xxxx.run.app
+  --dart-define=AVERTIS_API_BASE=https://avertis-687930058257.asia-south1.run.app
 ```
 
 That produces one APK per architecture (~20 MB each). For modern phones,
@@ -436,7 +457,7 @@ laptop's LAN address to that file and remove it afterwards.
 ## 4. A deployed end-to-end check
 
 ```bash
-URL=https://avertis-xxxx.run.app
+URL=https://avertis-687930058257.asia-south1.run.app
 
 curl -s $URL/api/v1/health | python3 -m json.tool          # is_model: true
 cd simulator && .venv/bin/python -m avertis_sim run response_adaptation --api $URL
