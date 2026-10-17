@@ -128,7 +128,7 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
   border: 1px solid var(--operational); color: var(--operational);
 }
 
-.alternatives { margin-top: 14px; }
+.alternatives { margin-top: 10px; }
 .alt-row {
   display: flex; justify-content: space-between; gap: 10px;
   padding: 7px 0; border-top: 1px solid var(--outline);
@@ -250,10 +250,23 @@ canvas {
 .dispatch:disabled { opacity: 0.45; cursor: default; filter: none; }
 
 .evidence { margin-top: 14px; }
-.evidence .label {
-  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+
+/* Collapsed by default. The decision is what the panel is for; the
+   supporting detail should be reachable in one click, not competing with
+   it for the operator's eye. */
+.disclosure {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: none; cursor: pointer; padding: 4px 0;
   color: var(--text-dim);
+  font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
+  font-family: inherit;
 }
+.disclosure:hover { color: var(--text); }
+.disclosure .caret {
+  display: inline-block; transition: transform 120ms ease;
+  font-size: 10px;
+}
+.disclosure[aria-expanded="true"] .caret { transform: rotate(90deg); }
 .evidence-items { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .evidence-items a { display: block; }
 .evidence-items img {

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avertis Command Centre</title>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -72,12 +72,23 @@
       <div id="why-text" class="why-text" hidden></div>
 
       <div id="evidence" class="evidence" hidden>
-        <span class="label">Evidence</span>
-        <div id="evidence-items" class="evidence-items"></div>
+        <button id="evidence-toggle" class="disclosure"
+                aria-expanded="false" aria-controls="evidence-items">
+          <span class="caret">▸</span>
+          <span id="evidence-label">Show evidence</span>
+        </button>
+        <div id="evidence-items" class="evidence-items" hidden></div>
       </div>
 
       <div id="decision-flags" class="flags"></div>
-      <div id="decision-alternatives" class="alternatives"></div>
+      <div class="alternatives">
+        <button id="alternatives-toggle" class="disclosure"
+                aria-expanded="false" aria-controls="decision-alternatives">
+          <span class="caret">▸</span>
+          <span id="alternatives-label">Other responders considered</span>
+        </button>
+        <div id="decision-alternatives" hidden></div>
+      </div>
     </div>
   </section>
 
@@ -167,6 +178,6 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

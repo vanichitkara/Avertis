@@ -39,6 +39,10 @@ const state = {
   search: "",
   severity: "ALL",
   status: "ALL",
+  // Collapsed by default, and reset when the operator moves to another
+  // incident — expanding one should not silently expand the next.
+  evidenceOpen: false,
+  alternativesOpen: false,
   // The last payload, kept so filtering and replay redraw from memory.
   // Re-fetching five endpoints on every keystroke made typing feel like
   // the page was struggling, for work that is entirely local.
@@ -391,6 +395,10 @@ function renderIncidents(data) {
 
     li.append(dot, who, what);
     li.onclick = () => {
+      if (state.selected !== incident.incident_id) {
+        state.evidenceOpen = false;
+        state.alternativesOpen = false;
+      }
       state.selected = incident.incident_id;
       state.whyOpen = false;
       refresh();
@@ -464,6 +472,12 @@ function renderDecision(world) {
     el("why-text").hidden = true;
     el("decision-flags").innerHTML = "";
     el("decision-alternatives").innerHTML = "";
+    el("decision-alternatives").hidden = true;
+    // Nothing was recommended, so there is nothing behind the fold and
+    // the control should say so rather than invite a click.
+    el("alternatives-label").textContent = "No recommendation yet";
+    el("alternatives-toggle").disabled = true;
+    el("alternatives-toggle").setAttribute("aria-expanded", "false");
     return;
   }
 
@@ -501,8 +515,26 @@ function renderDecision(world) {
 
   const alternatives = el("decision-alternatives");
   alternatives.innerHTML = "";
-  for (const alt of rec.alternatives || []) {
-    if (alt.responder_id === rec.recommended_responder) continue;
+
+  const others = (rec.alternatives || []).filter(
+    (a) => a.responder_id !== rec.recommended_responder
+  );
+  const unreachable = others.filter((a) => !a.reachable).length;
+
+  // Summarise what is behind the fold, including how many could not be
+  // reached — that is the detail that justifies the recommendation.
+  el("alternatives-label").textContent = others.length === 0
+    ? "No other responder was available"
+    : (state.alternativesOpen ? "Hide" : "Show") +
+      ` other responders considered (${others.length}` +
+      (unreachable ? `, ${unreachable} unreachable` : "") + ")";
+  el("alternatives-toggle").disabled = others.length === 0;
+  el("alternatives-toggle").setAttribute("aria-expanded",
+    String(state.alternativesOpen));
+  alternatives.hidden = !state.alternativesOpen;
+  if (!state.alternativesOpen) return;
+
+  for (const alt of others) {
     const row = document.createElement("div");
     row.className = `alt-row${alt.reachable ? "" : " unreachable"}`;
     const who = document.createElement("span");
@@ -559,6 +591,16 @@ function renderEvidence(incident) {
   // Media descriptors live on the evidence of each source report.
   const media = (incident.evidence || []).flatMap((e) => e.media || []);
   box.hidden = media.length === 0;
+
+  // The count is on the button, so a collapsed section never hides the
+  // fact that there is something to look at.
+  el("evidence-label").textContent = state.evidenceOpen
+    ? `Hide evidence (${media.length})`
+    : `Show evidence (${media.length})`;
+  el("evidence-toggle").setAttribute("aria-expanded",
+    String(state.evidenceOpen));
+  items.hidden = !state.evidenceOpen;
+  if (!state.evidenceOpen) return;
 
   for (const m of media) {
     if ((m.kind || "IMAGE") === "IMAGE") {
@@ -716,6 +758,15 @@ async function refresh() {
       `Cannot reach ${API} — ${error.message}. Showing the last known state.`;
   }
 }
+
+el("evidence-toggle").onclick = () => {
+  state.evidenceOpen = !state.evidenceOpen;
+  rerender();
+};
+el("alternatives-toggle").onclick = () => {
+  state.alternativesOpen = !state.alternativesOpen;
+  rerender();
+};
 
 el("incident-search").oninput = (event) => {
   state.search = event.target.value;
