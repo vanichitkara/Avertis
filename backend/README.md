@@ -92,10 +92,13 @@ run `gcloud auth application-default login`.
 
 ## Deploy
 
+See `docs/deployment.md`. In short: the Dockerfile lives at the **repository
+root**, not here, because one Cloud Run service carries both the API and the
+command centre.
+
 ```bash
-gcloud run deploy avertis-backend --source . --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=...,FIRESTORE_PROJECT=...
+cd ..   # repository root
+gcloud run deploy avertis --source . --region asia-south1 --allow-unauthenticated
 ```
 
 ## Tests

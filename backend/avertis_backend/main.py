@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import pathlib
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .agents.coordinator import Coordinator
 from .config import build_reasoner, build_store, load_settings
@@ -304,3 +306,33 @@ def metrics() -> dict:
         "media_stored": len(store.list_media()),
         "reasoned_by": reasoner.name,
     }
+
+
+# -- command centre ----------------------------------------------------------
+#
+# Served from this same service, mounted last so every /api/v1 route is
+# matched first. One deployment instead of two, and because the page resolves
+# its API base from location.origin there is no cross-origin request and
+# nothing to configure: open the service URL and it works.
+#
+# Skipped silently when the directory is absent, so the backend still runs
+# from a checkout that does not have it.
+# In a checkout the command centre sits beside backend/. In a container it
+# is wherever the image put it, so the location is overridable rather than
+# assumed — guessing wrong means deploying an API with no dashboard and no
+# error to say so.
+_COMMAND_CENTRE = pathlib.Path(
+    os.environ.get(
+        "COMMAND_CENTRE_DIR",
+        pathlib.Path(__file__).resolve().parent.parent.parent / "command-center",
+    )
+)
+if _COMMAND_CENTRE.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=_COMMAND_CENTRE, html=True),
+        name="command-centre",
+    )
+    log.info("serving the command centre from %s", _COMMAND_CENTRE)
+else:
+    log.info("command centre not found at %s — API only", _COMMAND_CENTRE)

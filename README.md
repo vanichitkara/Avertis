@@ -124,6 +124,8 @@ cd mobile && flutter test
 - Everything on my teammate's side, and the integration against it
 For the pitch and submission text, see `docs/overview.md`.
 
+To deploy, see `docs/deployment.md`.
+
 Before submitting, work through `docs/pre-submission-checklist.md`.
 
 See `docs/demo.md` for what can be demonstrated today and `docs/benchmarks.md`
