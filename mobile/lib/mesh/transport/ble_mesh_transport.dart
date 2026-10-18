@@ -73,21 +73,8 @@ class BleFraming {
     final count = frame[3];
     if (count == 0 || index >= count) return null;
 
-    buffer.touch();
-    buffer.expected = count;
-    buffer.totalBytes = total;
-    buffer.fragments[index] = frame.sublist(4);
-
-    if (buffer.fragments.length != count) return null;
-
-    final assembled = <int>[];
-    for (var i = 0; i < count; i++) {
-      final part = buffer.fragments[i];
-      if (part == null) return null;
-      assembled.addAll(part);
-    }
-    buffer.reset();
-    if (assembled.length != total) return null;
+    final assembled = buffer.add(total, count, index, frame.sublist(4));
+    if (assembled == null) return null;
     try {
       return Packet.decode(assembled);
     } on FormatException {
@@ -96,22 +83,76 @@ class BleFraming {
   }
 }
 
+/// Fragments arriving on one link, for however many packets are in
+/// flight at once.
+///
+/// There used to be exactly one set of fragments per peer, and the frame
+/// header carries no packet identifier, so two packets in flight shared
+/// a buffer and overwrote each other. Keeping only the newest would
+/// still lose whichever was already in progress, so partial packets are
+/// kept side by side, told apart by the one thing the header does carry:
+/// their total length and fragment count.
+///
+/// Two packets of identical length and fragment count remain
+/// indistinguishable. Nothing can separate those without a wire format
+/// change, so the transport also serialises its sends — this is the
+/// safety net, not the mechanism.
 class Reassembly {
-  final Map<int, Uint8List> fragments = {};
-  int expected = 0;
-  int totalBytes = 0;
-  DateTime lastFragment = DateTime.now();
+  final Map<int, Map<int, Uint8List>> _partials = {};
+  final Map<int, DateTime> _started = {};
 
-  void touch() {
-    if (DateTime.now().difference(lastFragment) > reassemblyTimeout) reset();
-    lastFragment = DateTime.now();
+  /// How often a frame arrived for a packet other than the one most
+  /// recently worked on. Non-zero means traffic is interleaving.
+  int mismatches = 0;
+  int _lastKey = -1;
+
+  static int _keyOf(int total, int count) => (total << 8) | count;
+
+  /// Add a fragment; returns the assembled bytes once a packet is whole.
+  List<int>? add(int total, int count, int index, Uint8List chunk) {
+    final now = DateTime.now();
+    _expire(now);
+
+    final key = _keyOf(total, count);
+    if (_lastKey != -1 && _lastKey != key) mismatches++;
+    _lastKey = key;
+
+    final fragments = _partials.putIfAbsent(key, () {
+      _started[key] = now;
+      return <int, Uint8List>{};
+    });
+    fragments[index] = chunk;
+
+    if (fragments.length != count) return null;
+
+    final assembled = <int>[];
+    for (var i = 0; i < count; i++) {
+      final part = fragments[i];
+      if (part == null) return null;
+      assembled.addAll(part);
+    }
+    _partials.remove(key);
+    _started.remove(key);
+    if (_lastKey == key) _lastKey = -1;
+    return assembled.length == total ? assembled : null;
+  }
+
+  void _expire(DateTime now) {
+    _started.removeWhere((key, started) {
+      if (now.difference(started) <= reassemblyTimeout) return false;
+      _partials.remove(key);
+      return true;
+    });
   }
 
   void reset() {
-    fragments.clear();
-    expected = 0;
-    totalBytes = 0;
+    _partials.clear();
+    _started.clear();
+    _lastKey = -1;
   }
+
+  /// Packets part-way through assembly right now.
+  int get pending => _partials.length;
 }
 
 /// What the radio has actually done, for a node that is finding nobody.
@@ -519,8 +560,46 @@ class BleMeshTransport extends MeshTransport {
     if (!_peerLost.isClosed) _peerLost.add(peerId);
   }
 
+  /// One packet's fragments must reach a peer without another packet's
+  /// in between.
+  ///
+  /// The frame header is [total][index][count] and carries no packet
+  /// identifier, so the receiver keeps one reassembly buffer per peer and
+  /// has no way to tell two packets apart. The engine beacons and pumps
+  /// the queue without awaiting either, so a single-frame HELLO landed
+  /// between two fragments of a report, overwrote the buffer's count and
+  /// one of its fragments, and destroyed both packets.
+  ///
+  /// Small packets survived that most of the time and multi-fragment ones
+  /// almost never did, which is why two phones could hold a steady link,
+  /// exchange beacons, agree they were neighbours — and never once get a
+  /// report across. On the handsets this showed as roughly four frames
+  /// received for every packet decoded.
+  final Map<String, Future<void>> _sendLocks = {};
+
+  Future<bool> _serialised(String peerId, Future<bool> Function() send) async {
+    final previous = _sendLocks[peerId];
+    final mine = Completer<void>();
+    _sendLocks[peerId] = mine.future;
+    if (previous != null) {
+      // A stuck send must not wedge the link for good.
+      await previous.timeout(const Duration(seconds: 15), onTimeout: () {});
+    }
+    try {
+      return await send();
+    } finally {
+      mine.complete();
+      if (identical(_sendLocks[peerId], mine.future)) {
+        _sendLocks.remove(peerId);
+      }
+    }
+  }
+
   @override
-  Future<bool> send(String toNode, Packet packet) async {
+  Future<bool> send(String toNode, Packet packet) =>
+      _serialised(toNode, () => _sendNow(toNode, packet));
+
+  Future<bool> _sendNow(String toNode, Packet packet) async {
     final characteristic = _writeChars[toNode];
     if (characteristic != null) {
       try {
