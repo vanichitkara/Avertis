@@ -30,6 +30,7 @@ class SyncResult {
     required this.deferred,
     required this.bytesSent,
     this.incidentIds = const [],
+    this.incidentByReport = const {},
     this.acceptedReportIds = const [],
     this.media = MediaUploadResult.none,
     this.error,
@@ -40,6 +41,14 @@ class SyncResult {
   final int deferred;
   final int bytesSent;
   final List<String> incidentIds;
+
+  /// report_id → incident_id, as the backend paired them.
+  ///
+  /// The pairing is the useful part and used to be discarded: without it
+  /// the app knows a report was accepted but not what it became, so it
+  /// can never show the sender what the command centre made of their
+  /// report.
+  final Map<String, String> incidentByReport;
   final List<String> acceptedReportIds;
 
   /// What the leftover window carried, after the reports.
@@ -292,6 +301,11 @@ class GatewayClient {
         .cast<Map<String, dynamic>>();
     final incidentIds =
         incidents.map((i) => i['incident_id'] as String).toList();
+    final incidentByReport = <String, String>{
+      for (final i in incidents)
+        if (i['report_id'] is String && i['incident_id'] is String)
+          i['report_id'] as String: i['incident_id'] as String,
+    };
 
     // Anything acknowledged is no longer this node's problem — neither as a
     // gateway holding it for someone else, nor as the node that wrote it.
@@ -345,6 +359,7 @@ class GatewayClient {
       deferred: ordered.length - batch.length,
       bytesSent: used + mediaResult.bytesSent,
       incidentIds: incidentIds,
+      incidentByReport: incidentByReport,
       acceptedReportIds: accepted,
       media: mediaResult,
     );

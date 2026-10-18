@@ -393,7 +393,11 @@ function renderIncidents(data) {
       `${incident.type} · ${incident.evidence.length} source(s) · ` +
       `confidence ${Math.round(incident.confidence * 100)}%`;
 
-    li.append(dot, who, what);
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = whenText(incident.created_at);
+
+    li.append(dot, who, what, when);
     li.onclick = () => {
       if (state.selected !== incident.incident_id) {
         state.evidenceOpen = false;
@@ -405,6 +409,29 @@ function renderIncidents(data) {
     };
     list.append(li);
   }
+}
+
+/// When something happened, in the form an operator actually needs.
+///
+/// Absolute time for the record, and elapsed time because that is what
+/// drives urgency — "14:02" says less than "22 min ago" when deciding
+/// what to look at next.
+function whenText(iso) {
+  if (!iso) return "time unknown";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "time unknown";
+
+  const seconds = Math.max(0, (Date.now() - then.getTime()) / 1000);
+  const clock = then.toLocaleTimeString([], {
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  if (seconds < 90) return `${clock} · just now`;
+  if (seconds < 3600) return `${clock} · ${Math.round(seconds / 60)} min ago`;
+  if (seconds < 86400) {
+    return `${clock} · ${Math.round(seconds / 3600)} h ago`;
+  }
+  return `${then.toLocaleDateString()} ${clock}`;
 }
 
 function severityColour(severity) {
@@ -445,6 +472,8 @@ function renderDecision(world) {
   sev.className = `pill ${chosenIncident.severity}`;
 
   const people = chosenIncident.people_affected;
+  el("decision-when").textContent =
+    `Reported ${whenText(chosenIncident.created_at)}`;
   el("decision-sources").textContent =
     `${chosenIncident.evidence.length} source(s) · confidence ` +
     `${Math.round(chosenIncident.confidence * 100)}% · ` +

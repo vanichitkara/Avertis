@@ -16,6 +16,7 @@ import '../mesh/transport/mesh_transport.dart';
 import '../mesh/transport/mock_mesh_transport.dart';
 import '../services/location_service.dart';
 import '../services/gateway_client.dart';
+import '../services/incident_lookup.dart';
 import '../services/media_uploader.dart';
 import '../services/mesh_service_channel.dart';
 import '../services/permissions_service.dart';
@@ -121,6 +122,12 @@ class MeshController extends ChangeNotifier {
   /// work.
   GatewayClient? get gateway => _gateway;
   bool get hasBackend => apiBase.isNotEmpty;
+
+  /// Looks up what the command centre made of a report. Null without a
+  /// backend, since there is nowhere to ask.
+  IncidentLookup? get incidentLookup => hasBackend
+      ? IncidentLookup(baseUrl: apiBase, apiKey: apiKey)
+      : null;
 
   /// Why an unacknowledged report has not gone yet.
   ///
@@ -300,6 +307,12 @@ class MeshController extends ChangeNotifier {
     // restart does not re-offer it.
     for (final reportId in result.acceptedReportIds) {
       await database.markAcknowledged(reportId, DateTime.now().toUtc());
+    }
+    // Record what each report became, so the sender can see that their
+    // SOS is now a numbered incident at the command centre rather than
+    // just "acknowledged" by something unnamed.
+    for (final entry in result.incidentByReport.entries) {
+      await database.attachIncidentId(entry.key, entry.value);
     }
     _internetOnline = result.ok;
     if (!_disposed) notifyListeners();

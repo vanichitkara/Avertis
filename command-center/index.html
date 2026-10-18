@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avertis Command Centre</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -41,7 +41,10 @@
           <span id="decision-id" class="incident-id"></span>
           <span id="decision-severity" class="pill"></span>
         </div>
-        <span id="decision-sources" class="muted"></span>
+        <span class="decision-meta">
+          <span id="decision-when" class="muted small"></span>
+          <span id="decision-sources" class="muted"></span>
+        </span>
       </div>
       <p id="decision-desc" class="desc"></p>
 
@@ -178,6 +181,6 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

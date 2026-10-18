@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/providers.dart';
+import '../../services/incident_lookup.dart';
 import '../../core/theme.dart';
 import '../../data/report_store.dart';
 
@@ -30,8 +31,10 @@ class ReportsListScreen extends ConsumerWidget {
           error: (e, _) => Center(child: Text('Could not load reports: $e')),
           data: (rows) => rows.isEmpty
               ? const Center(
-                  child: Text('You have not sent any reports yet',
-                      style: TextStyle(color: AvertisColors.textSecondary)),
+                  child: Text(
+                    'You have not sent any reports yet',
+                    style: TextStyle(color: AvertisColors.textSecondary),
+                  ),
                 )
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
@@ -39,8 +42,13 @@ class ReportsListScreen extends ConsumerWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => _ReportCard(
                     report: rows[i],
-                    pendingReason:
-                        ref.watch(meshControllerProvider).pendingReason(),
+                    pendingReason: ref
+                        .watch(meshControllerProvider)
+                        .pendingReason(),
+                    onOpen: rows[i].incidentId == null
+                        ? null
+                        : () =>
+                              _showIncident(context, ref, rows[i].incidentId!),
                   ),
                 ),
         ),
@@ -49,13 +57,163 @@ class ReportsListScreen extends ConsumerWidget {
   }
 }
 
+/// Show what the command centre made of this report.
+Future<void> _showIncident(
+  BuildContext context,
+  WidgetRef ref,
+  String incidentId,
+) async {
+  final lookup = ref.read(meshControllerProvider).incidentLookup;
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: AvertisColors.surface,
+    showDragHandle: true,
+    builder: (_) => FutureBuilder<IncidentView?>(
+      future: lookup?.fetch(incidentId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final view = snapshot.data;
+        if (view == null) {
+          // The report is not in doubt — only our ability to look it up.
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  incidentId,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Your report reached the command centre. Its current '
+                  'details cannot be fetched right now — that needs a '
+                  'connection.',
+                  style: TextStyle(color: AvertisColors.textSecondary),
+                ),
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    view.incidentId,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorForPriority(view.severity),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      view.severity.replaceAll('_', ' '),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (view.description != null && view.description!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(view.description!),
+                ),
+              _detail('Classified as', view.type.toLowerCase()),
+              _detail('Status', view.status.toLowerCase()),
+              _detail(
+                'People affected',
+                view.peopleAffected?.toString() ??
+                    'not stated — nobody guessed one',
+              ),
+              _detail(
+                'Confidence',
+                '${(view.confidence * 100).round()}% from '
+                    '${view.sourceCount} source(s)',
+              ),
+              if (view.recommendedResponder != null)
+                _detail('Responder assigned', view.recommendedResponder!),
+              if (view.wasFused)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    '${view.sourceCount} people reported this event. They '
+                    'were combined into one incident so the command centre '
+                    'sees it once.',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AvertisColors.textSecondary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+Widget _detail(String label, String value) => Padding(
+  padding: const EdgeInsets.only(bottom: 6),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SizedBox(
+        width: 130,
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AvertisColors.textSecondary,
+          ),
+        ),
+      ),
+      Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+    ],
+  ),
+);
+
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({required this.report, required this.pendingReason});
+  const _ReportCard({
+    required this.report,
+    required this.pendingReason,
+    this.onOpen,
+  });
 
   final Report report;
 
   /// What is holding an unacknowledged report up, in plain words.
   final String pendingReason;
+
+  /// Set once the report has become an incident worth opening.
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -63,100 +221,125 @@ class _ReportCard extends StatelessWidget {
     final time = DateFormat('HH:mm:ss').format(report.createdAt.toLocal());
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: color),
-                  ),
-                  child: Text(
-                    report.priority.replaceAll('_', ' '),
-                    style: TextStyle(
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: color),
+                    ),
+                    child: Text(
+                      report.priority.replaceAll('_', ' '),
+                      style: TextStyle(
                         color: color,
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
-                        letterSpacing: 0.8),
+                        letterSpacing: 0.8,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text(report.kind,
+                  const SizedBox(width: 8),
+                  Text(
+                    report.kind,
                     style: const TextStyle(
-                        fontSize: 11,
-                        color: AvertisColors.textSecondary,
-                        fontWeight: FontWeight.w700)),
-                const Spacer(),
-                Text(time,
+                      fontSize: 11,
+                      color: AvertisColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    time,
                     style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: AvertisColors.textSecondary)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(report.body ?? '(no description)',
-                style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Icon(
-                  report.acknowledged
-                      ? Icons.check_circle_outline
-                      : Icons.schedule,
-                  size: 14,
-                  color: report.acknowledged
-                      ? AvertisColors.online
-                      : AvertisColors.operational,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  report.acknowledged
-                      ? 'Acknowledged by the network'
-                      : 'Waiting for acknowledgement',
-                  style: TextStyle(
-                    fontSize: 12,
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: AvertisColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                report.body ?? '(no description)',
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    report.acknowledged
+                        ? Icons.check_circle_outline
+                        : Icons.schedule,
+                    size: 14,
                     color: report.acknowledged
                         ? AvertisColors.online
                         : AvertisColors.operational,
                   ),
-                ),
-                if (report.retransmissions > 0) ...[
-                  const SizedBox(width: 8),
-                  Text('· retried ${report.retransmissions}×',
+                  const SizedBox(width: 6),
+                  Text(
+                    report.acknowledged
+                        ? 'Acknowledged by the network'
+                        : 'Waiting for acknowledgement',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: report.acknowledged
+                          ? AvertisColors.online
+                          : AvertisColors.operational,
+                    ),
+                  ),
+                  if (report.retransmissions > 0) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '· retried ${report.retransmissions}×',
                       style: const TextStyle(
-                          fontSize: 11,
-                          color: AvertisColors.textSecondary)),
+                        fontSize: 11,
+                        color: AvertisColors.textSecondary,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-            // Say what is actually holding it up. Without this the same
-            // line appears whether delivery is twenty seconds away or
-            // impossible.
-            if (!report.acknowledged)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 20),
-                child: Text(
-                  pendingReason,
-                  style: const TextStyle(
-                      fontSize: 11, color: AvertisColors.textSecondary),
-                ),
               ),
-            if (report.incidentId != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text('Command centre incident ${report.incidentId}',
+              // Say what is actually holding it up. Without this the same
+              // line appears whether delivery is twenty seconds away or
+              // impossible.
+              if (!report.acknowledged)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 20),
+                  child: Text(
+                    pendingReason,
                     style: const TextStyle(
-                        fontSize: 11, color: AvertisColors.mesh)),
-              ),
-          ],
+                      fontSize: 11,
+                      color: AvertisColors.textSecondary,
+                    ),
+                  ),
+                ),
+              if (report.incidentId != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Command centre incident ${report.incidentId} — tap for '
+                    'details',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AvertisColors.mesh,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
