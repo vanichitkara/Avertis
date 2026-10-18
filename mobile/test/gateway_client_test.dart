@@ -459,6 +459,88 @@ void main() {
           reason: 'the descriptor itself must still travel');
     });
   });
+
+  /// What the command centre can draw depends entirely on this payload.
+  ///
+  /// Two handsets beside each other showed up as one lone node with no
+  /// edges: the sync carried this phone's own snapshot and nothing else,
+  /// and a neighbour with no internet never syncs on its own behalf.
+  group('neighbours in the topology', () {
+    Neighbor heard(String id, {double stability = 0.9, int rssi = -62}) {
+      final n = Neighbor(id)
+        ..role = NodeRole.survivor
+        ..battery = 0.64
+        ..location = const GeoPoint(12.9716, 77.5946, accuracyM: 8.0)
+        ..gatewayDistance = 1
+        ..rssi = rssi
+        ..stability = stability
+        ..state = LinkState.up;
+      engine.state.neighbors[id] = n;
+      return n;
+    }
+
+    test('a neighbour this phone can hear is reported as a node', () async {
+      heard('phone-1');
+      await client.sync(windowSeconds: 30);
+
+      final nodes = (backend.bodies.single['nodes'] as List)
+          .cast<Map<String, dynamic>>();
+      final ids = nodes.map((n) => n['node_id']).toList();
+      expect(ids, containsAll(<String>['gw-01', 'phone-1']),
+          reason: 'the offline phone exists only in what this one heard');
+
+      final seen = nodes.firstWhere((n) => n['node_id'] == 'phone-1');
+      expect(seen['battery'], 0.64);
+      expect(seen['link_stability'], 0.9);
+      expect(seen['neighbors'], ['gw-01'], reason: 'the link is two-way');
+    });
+
+    test('the link between them is reported too', () async {
+      heard('phone-1', stability: 0.82, rssi: -71);
+      await client.sync(windowSeconds: 30);
+
+      final links = (backend.bodies.single['links'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(links, hasLength(1));
+      expect(links.single['a'], 'gw-01');
+      expect(links.single['b'], 'phone-1');
+      expect(links.single['stability'], 0.82);
+      expect(links.single['rssi'], -71);
+    });
+
+    test('a neighbour that has gone quiet is not reported', () async {
+      heard('phone-1').state = LinkState.down;
+      await client.sync(windowSeconds: 30);
+
+      final body = backend.bodies.single;
+      final ids = (body['nodes'] as List)
+          .cast<Map<String, dynamic>>()
+          .map((n) => n['node_id']);
+      expect(ids, ['gw-01'],
+          reason: 'a node nobody can hear must not be drawn as reachable');
+      expect(body['links'], isEmpty);
+    });
+
+    test('nothing is claimed about a neighbour that was not heard', () async {
+      heard('phone-1');
+      await client.sync(windowSeconds: 30);
+
+      final seen = (backend.bodies.single['nodes'] as List)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((n) => n['node_id'] == 'phone-1');
+      expect(seen.containsKey('queue_depth'), isFalse,
+          reason: 'a beacon says nothing about the sender\'s queue');
+    });
+
+    test('topology still goes out with no reports to send', () async {
+      heard('phone-1');
+      final result = await client.sync(windowSeconds: 30);
+
+      expect(result.attempted, 0);
+      expect(backend.bodies, hasLength(1),
+          reason: 'a relay appearing is news even with no report attached');
+    });
+  });
 }
 
 /// Reachability drives both the connectivity shown on the home screen and

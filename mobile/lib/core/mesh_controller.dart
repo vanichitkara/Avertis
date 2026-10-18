@@ -114,6 +114,9 @@ class MeshController extends ChangeNotifier {
 
   GatewayClient? _gateway;
 
+  /// The role this node was started with, restored when an uplink is lost.
+  NodeRole _configuredRole = NodeRole.survivor;
+
   MeshEngine? get engine => _engine;
   bool get isRunning => _engine != null;
 
@@ -128,6 +131,38 @@ class MeshController extends ChangeNotifier {
   IncidentLookup? get incidentLookup => hasBackend
       ? IncidentLookup(baseUrl: apiBase, apiKey: apiKey)
       : null;
+
+  /// A phone that can reach the backend *is* a gateway.
+  ///
+  /// Reports are addressed to "gateway", and only a node whose role is
+  /// GATEWAY accepts delivery of them or holds them for syncing. Every
+  /// phone runs as a survivor, so a neighbour's report would be relayed
+  /// past a handset that had working internet and never picked up — the
+  /// one thing store-and-forward exists to do.
+  ///
+  /// The role follows connectivity rather than being configured, because
+  /// in a disaster that is exactly what changes: whichever phone finds
+  /// signal becomes everyone else's way out.
+  void _applyGatewayRole(bool reachable) {
+    final engine = _engine;
+    if (engine == null) return;
+
+    final shouldBeGateway = reachable && hasBackend;
+    final isGateway = engine.state.role == NodeRole.gateway;
+    if (shouldBeGateway == isGateway) return;
+
+    engine.state.role =
+        shouldBeGateway ? NodeRole.gateway : _configuredRole;
+    bus.emit(MeshEvent(
+      shouldBeGateway ? MeshEventType.gatewayUp : MeshEventType.gatewayDown,
+      engine.nodeId,
+      {
+        'reason': shouldBeGateway
+            ? 'this device can reach the command centre'
+            : 'this device lost its connection',
+      },
+    ));
+  }
 
   /// Why an unacknowledged report has not gone yet.
   ///
@@ -214,6 +249,7 @@ class MeshController extends ChangeNotifier {
     GeoPoint? location,
   }) async {
     if (_engine != null) return;
+    _configuredRole = role;
 
     final MeshTransport transport;
     switch (mode) {
@@ -334,6 +370,7 @@ class MeshController extends ChangeNotifier {
 
     final becameReachable = reachable && !_internetOnline;
     _internetOnline = reachable;
+    _applyGatewayRole(reachable);
     notifyListeners();
 
     if (!reachable) return;

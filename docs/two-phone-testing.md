@@ -185,6 +185,33 @@ worth showing — just do not call it multi-hop.
       service exists for, and its notification should be visible on B's lock
       screen.
 
+### 5.7 Out through the phone that has signal
+
+The scenario the whole mesh exists for: A has Bluetooth only, B has
+Bluetooth and Wi-Fi.
+
+- [ ] Turn Wi-Fi and mobile data **off** on A. Its home screen reads
+      `Internet OFFLINE`.
+- [ ] Leave B online. Within 20 seconds its home screen reads
+      `Internet ONLINE`, and its mesh activity feed shows a **GATEWAY UP**
+      entry saying it can reach the command centre.
+- [ ] Send an SOS from A.
+- [ ] A's report moves from waiting to **acknowledged** — that is B taking
+      custody, not the backend.
+- [ ] Within 20 seconds the incident appears on the command centre, with
+      `origin_node` set to **A's** node id, not B's.
+- [ ] The command centre's network panel shows **both** phones and the link
+      between them, sourced `DEVICE`.
+
+The role is not configured anywhere: whichever phone can reach the backend
+promotes itself to gateway and hands the role back when it cannot. Turn B's
+Wi-Fi off and its feed shows **GATEWAY DOWN** on the next check.
+
+If A's report stays at waiting while B is online, the two phones are not
+actually linked — go back to §5.1. The report reaching B is a mesh problem;
+the report reaching the backend is a sync problem, and the acknowledgement
+is what tells you which one you have.
+
 ---
 
 ## 6. What to do if BLE does not come up

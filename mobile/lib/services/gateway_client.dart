@@ -11,6 +11,7 @@ import 'package:dio/dio.dart';
 
 import '../mesh/mesh_engine.dart';
 import '../mesh/mesh_events.dart';
+import '../mesh/node_state.dart';
 import '../mesh/protocol/packet.dart';
 import 'media_uploader.dart';
 
@@ -192,6 +193,26 @@ class GatewayClient {
     };
   }
 
+  /// What this phone knows about a neighbour, and only that.
+  ///
+  /// Everything here came off that neighbour's beacons. What a beacon does
+  /// not carry is left at its default rather than guessed: the queue depth
+  /// is its own business, and claiming a figure for it would put a number
+  /// on an operator's screen that nothing measured.
+  Map<String, dynamic> _neighborSnapshot(Neighbor neighbor) {
+    return {
+      'node_id': neighbor.nodeId,
+      'role': neighbor.role.wire,
+      'battery': double.parse(neighbor.battery.toStringAsFixed(3)),
+      'location': neighbor.location?.toJson(),
+      // The link is two-way, so this phone belongs in its list as well.
+      'neighbors': [engine.nodeId],
+      'gateway_distance': neighbor.gatewayDistance,
+      'link_stability': double.parse(neighbor.stability.toStringAsFixed(3)),
+      'alive': true,
+    };
+  }
+
   /// Spend a connectivity window. Returns what actually happened — nothing is
   /// reported as sent that was not sent.
   Future<SyncResult> sync({
@@ -238,12 +259,36 @@ class GatewayClient {
       used += size;
     }
 
-    // Whatever budget is left carries this node's own view of the topology.
+    // Whatever budget is left carries this node's own view of the topology:
+    // this phone, every phone it can currently hear, and the links between.
+    //
+    // Reporting only itself was not enough. A neighbour that has no internet
+    // never syncs on its own behalf, so the only evidence it exists is this
+    // phone hearing its beacons — and the command centre drew a lone node
+    // with no edges while two handsets sat beside each other talking. The
+    // fields below are all things a beacon actually carries (docs/protocol.md
+    // §5); nothing is invented to fill the shape out.
     final snapshot = engine.snapshot();
     final snapshotSize = utf8.encode(jsonEncode(snapshot)).length;
     if (used + snapshotSize <= budget) {
       (body['nodes'] as List).add(snapshot);
       used += snapshotSize;
+    }
+
+    for (final neighbor in engine.state.liveNeighbors) {
+      final heard = _neighborSnapshot(neighbor);
+      final link = <String, dynamic>{
+        'a': engine.nodeId,
+        'b': neighbor.nodeId,
+        'stability': double.parse(neighbor.stability.toStringAsFixed(3)),
+        'rssi': neighbor.rssi,
+      };
+      final size = utf8.encode(jsonEncode(heard)).length +
+          utf8.encode(jsonEncode(link)).length;
+      if (used + size > budget) break;
+      (body['nodes'] as List).add(heard);
+      (body['links'] as List).add(link);
+      used += size;
     }
 
     bus.emit(MeshEvent(MeshEventType.syncStarted, engine.nodeId, {
