@@ -275,6 +275,11 @@ class BleMeshTransport extends MeshTransport {
   final Map<String, BluetoothCharacteristic> _writeChars = {};
   final Map<String, Reassembly> _buffers = {};
   final Map<String, StreamSubscription<dynamic>> _valueSubs = {};
+  final Map<String, StreamSubscription<dynamic>> _connSubs = {};
+
+  /// Peers whose setup is in flight, so repeated scan results do not
+  /// start a second one over the top of the first.
+  final Set<String> _connecting = {};
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   final List<StreamSubscription<dynamic>> _peripheralSubs = [];
@@ -406,12 +411,37 @@ class BleMeshTransport extends MeshTransport {
     return 1.0;
   }
 
+  /// Set up a peer we found by scanning, once.
+  ///
+  /// This is called for every scan result, and scan results repeat — the
+  /// same peer arrives every few seconds for as long as it is in range.
+  /// Without the in-flight guard several setups ran at once on a single
+  /// GATT connection, and Android allows one outstanding operation per
+  /// connection. Service discovery and the CCCD write raced, and the
+  /// CCCD write is the one that loses: the connection comes up, the
+  /// write characteristic is found, and the subscription silently never
+  /// happens.
+  ///
+  /// The peer's GATT server then has us in `connected` but not in
+  /// `subscribed`, so every notification back to us is refused — "the
+  /// GATT server refused a notification … is the peer subscribed?" — and
+  /// the link carries traffic in one direction only. Which is a mesh
+  /// that relays reports and never acknowledges them.
   Future<void> _ensureConnected(String peerId, BluetoothDevice device) async {
-    if (_writeChars.containsKey(peerId)) return;
+    // Fully set up means both halves: somewhere to write, and a
+    // subscription to be written to. Either one alone is a one-way link
+    // and must be retried, not treated as done.
+    if (_writeChars.containsKey(peerId) && _valueSubs.containsKey(peerId)) {
+      return;
+    }
+    if (!_connecting.add(peerId)) return;
+
     try {
       diagnostics.connectAttempts++;
       await device.connect(timeout: const Duration(seconds: 8));
       final services = await device.discoverServices();
+
+      BluetoothCharacteristic? notify;
       for (final service in services) {
         if (service.serviceUuid != avertisServiceUuid) continue;
         for (final characteristic in service.characteristics) {
@@ -422,16 +452,29 @@ class BleMeshTransport extends MeshTransport {
           // ...and the peer notifies us back here.
           if (characteristic.characteristicUuid ==
               avertisNotifyCharacteristic) {
-            await characteristic.setNotifyValue(true);
-            _valueSubs[peerId] = characteristic.onValueReceived.listen(
-              (value) => _onFrame(peerId, Uint8List.fromList(value)),
-            );
+            notify = characteristic;
           }
         }
       }
-      if (_writeChars.containsKey(peerId)) {
+
+      // Subscribe after discovery has finished rather than in the middle
+      // of walking its results, so the CCCD write is the only operation
+      // in flight.
+      if (notify != null) {
+        await notify.setNotifyValue(true);
+        await _valueSubs.remove(peerId)?.cancel();
+        _valueSubs[peerId] = notify.onValueReceived.listen(
+          (value) => _onFrame(peerId, Uint8List.fromList(value)),
+        );
+      }
+
+      if (_writeChars.containsKey(peerId) && _valueSubs.containsKey(peerId)) {
         diagnostics.connected++;
         diagnostics.connectError = null;
+      } else if (_writeChars.containsKey(peerId)) {
+        diagnostics.connectError =
+            'connected to $peerId but could not subscribe to its '
+            'notifications — it will not be able to answer us';
       } else {
         // Connected, but the service did not expose what we need. Worth
         // separating from a failed connection: it means the peer is a
@@ -439,7 +482,11 @@ class BleMeshTransport extends MeshTransport {
         diagnostics.connectError =
             'connected to $peerId but found no Avertis write characteristic';
       }
-      device.connectionState.listen((state) {
+
+      // One listener per peer. Registering this on every setup left a
+      // stack of them, each firing _dropPeer on the same disconnect.
+      await _connSubs.remove(peerId)?.cancel();
+      _connSubs[peerId] = device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
           _dropPeer(peerId);
         }
@@ -448,6 +495,8 @@ class BleMeshTransport extends MeshTransport {
       diagnostics.connectFailures++;
       diagnostics.connectError = error.toString();
       _dropPeer(peerId);
+    } finally {
+      _connecting.remove(peerId);
     }
   }
 
@@ -466,6 +515,7 @@ class BleMeshTransport extends MeshTransport {
     _writeChars.remove(peerId);
     _buffers.remove(peerId);
     unawaited(_valueSubs.remove(peerId)?.cancel());
+    unawaited(_connSubs.remove(peerId)?.cancel());
     if (!_peerLost.isClosed) _peerLost.add(peerId);
   }
 
@@ -547,6 +597,11 @@ class BleMeshTransport extends MeshTransport {
       await sub.cancel();
     }
     _valueSubs.clear();
+    for (final sub in _connSubs.values) {
+      await sub.cancel();
+    }
+    _connSubs.clear();
+    _connecting.clear();
     for (final device in _devices.values) {
       try {
         await device.disconnect();
