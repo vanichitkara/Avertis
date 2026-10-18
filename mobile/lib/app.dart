@@ -57,9 +57,25 @@ class _AvertisAppState extends ConsumerState<AvertisApp> {
   /// the UI would still look fine. [MeshController.start] is idempotent, so
   /// calling this more than once is harmless.
   Future<void> _startCurrentNode() async {
-    final nodeId = await ref.read(nodeIdProvider.future);
+    // The mesh must come up even if nothing else does. Anything that can
+    // fail before start() — secure storage above all — takes the engine
+    // with it, and an app that cannot send an SOS is worse than one with
+    // a forgotten node id.
+    String nodeId;
+    try {
+      nodeId = await ref.read(nodeIdProvider.future);
+    } catch (error) {
+      debugPrint('avertis: node identity unavailable ($error); '
+          'starting with a temporary id');
+      nodeId = 'n${DateTime.now().microsecondsSinceEpoch % 100000}';
+    }
     if (!mounted) return;
-    await ref.read(meshControllerProvider).start(nodeId: nodeId);
+
+    try {
+      await ref.read(meshControllerProvider).start(nodeId: nodeId);
+    } catch (error) {
+      debugPrint('avertis: the mesh engine failed to start ($error)');
+    }
   }
 
   @override

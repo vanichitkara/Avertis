@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing is backed up or transferred to a new device.
+
+  Android's automatic backup restores an app's encrypted preferences
+  without the Keystore key that decrypts them, so after a reinstall every
+  secure-storage read fails with a padding error. That took the whole app
+  down: the node identity is read before the mesh engine starts, so the
+  engine never started, permissions were never requested, connectivity was
+  never checked, and sending an SOS died on a null check — three
+  unrelated-looking symptoms from one unreadable value.
+
+  The code now survives that read failing. This stops it happening in the
+  first place. Nothing here is worth restoring anyway: reports are local
+  to one device and sync to the command centre, and a node identity is
+  cheap to reissue.
+-->
+<data-extraction-rules>
+    <cloud-backup><exclude domain="root" /></cloud-backup>
+    <device-transfer><exclude domain="root" /></device-transfer>
+</data-extraction-rules>

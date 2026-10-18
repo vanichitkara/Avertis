@@ -419,12 +419,28 @@ class MeshController extends ChangeNotifier {
     _refreshStatus();
   }
 
+  /// The engine, or an error a person can act on.
+  ///
+  /// This used to be `_engine!`, which surfaced as "Null check operator
+  /// used on a null value" under a Could not send banner — true, and
+  /// useless to anyone reading it.
+  MeshEngine _requireEngine() {
+    final engine = _engine;
+    if (engine == null) {
+      throw StateError(
+        'The mesh is still starting up. Close and reopen the app; if this '
+        'keeps happening, reinstall it.',
+      );
+    }
+    return engine;
+  }
+
   // -- reporting -------------------------------------------------------
 
   /// Persist first, then transmit. If this device dies between the two, the
   /// report is still on disk and is re-offered next launch.
   Future<Packet> sendSos({String note = '', int? peopleCount}) async {
-    final engine = _engine!;
+    final engine = _requireEngine();
     final packet = await engine.sendSos(note: note, peopleCount: peopleCount);
     await _persist(packet, kind: 'SOS', body: note, peopleCount: peopleCount);
     return packet;
@@ -435,7 +451,7 @@ class MeshController extends ChangeNotifier {
     Priority priority = Priority.emergency,
     List<Map<String, dynamic>> media = const [],
   }) async {
-    final engine = _engine!;
+    final engine = _requireEngine();
     final packet =
         await engine.sendIncident(text, priority: priority, media: media);
     await _persist(packet, kind: 'REPORT', body: text);
