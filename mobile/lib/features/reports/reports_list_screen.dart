@@ -58,125 +58,144 @@ class ReportsListScreen extends ConsumerWidget {
 }
 
 /// Show what the command centre made of this report.
-Future<void> _showIncident(
-  BuildContext context,
-  WidgetRef ref,
-  String incidentId,
-) async {
+void _showIncident(BuildContext context, WidgetRef ref, String incidentId) {
   final lookup = ref.read(meshControllerProvider).incidentLookup;
   showModalBottomSheet<void>(
     context: context,
     backgroundColor: AvertisColors.surface,
     showDragHandle: true,
-    builder: (_) => FutureBuilder<IncidentView?>(
-      future: lookup?.fetch(incidentId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final view = snapshot.data;
-        if (view == null) {
-          // The report is not in doubt — only our ability to look it up.
-          return Padding(
+    // Without this the sheet is capped at half the screen, and on a small
+    // phone the detail below the fold is simply unreachable.
+    isScrollControlled: true,
+    builder: (_) => _IncidentSheet(incidentId: incidentId, lookup: lookup),
+  );
+}
+
+/// The sheet holds its own request.
+///
+/// Built inline in a FutureBuilder, the fetch restarted on every rebuild —
+/// and the parent rebuilds once a second from the mesh status timer — so
+/// the sheet flashed back to a spinner continually and never settled. The
+/// future is created once, here.
+class _IncidentSheet extends StatefulWidget {
+  const _IncidentSheet({required this.incidentId, required this.lookup});
+
+  final String incidentId;
+  final IncidentLookup? lookup;
+
+  @override
+  State<_IncidentSheet> createState() => _IncidentSheetState();
+}
+
+class _IncidentSheetState extends State<_IncidentSheet> {
+  late final Future<IncidentView?> _incident =
+      widget.lookup?.fetch(widget.incidentId) ?? Future.value(null);
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.55,
+      minChildSize: 0.3,
+      maxChildSize: 0.9,
+      builder: (context, scrollController) => FutureBuilder<IncidentView?>(
+        future: _incident,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          // Scrollable in its own right, so a drag moves the content
+          // rather than dismissing the sheet.
+          return SingleChildScrollView(
+            controller: scrollController,
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  incidentId,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Your report reached the command centre. Its current '
-                  'details cannot be fetched right now — that needs a '
-                  'connection.',
-                  style: TextStyle(color: AvertisColors.textSecondary),
-                ),
-              ],
-            ),
+            child: snapshot.data == null
+                ? _unavailable(widget.incidentId)
+                : _details(snapshot.data!),
           );
-        }
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    view.incidentId,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorForPriority(view.severity),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      view.severity.replaceAll('_', ' '),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (view.description != null && view.description!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(view.description!),
-                ),
-              _detail('Classified as', view.type.toLowerCase()),
-              _detail('Status', view.status.toLowerCase()),
-              _detail(
-                'People affected',
-                view.peopleAffected?.toString() ??
-                    'not stated — nobody guessed one',
-              ),
-              _detail(
-                'Confidence',
-                '${(view.confidence * 100).round()}% from '
-                    '${view.sourceCount} source(s)',
-              ),
-              if (view.recommendedResponder != null)
-                _detail('Responder assigned', view.recommendedResponder!),
-              if (view.wasFused)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    '${view.sourceCount} people reported this event. They '
-                    'were combined into one incident so the command centre '
-                    'sees it once.',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AvertisColors.textSecondary,
-                    ),
-                  ),
-                ),
-            ],
+        },
+      ),
+    );
+  }
+
+  Widget _unavailable(String incidentId) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        incidentId,
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 8),
+      // The report is not in doubt — only our ability to look it up.
+      const Text(
+        'Your report reached the command centre. Its current details '
+        'cannot be fetched right now — that needs a connection.',
+        style: TextStyle(color: AvertisColors.textSecondary),
+      ),
+    ],
+  );
+
+  Widget _details(IncidentView view) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Text(
+            view.incidentId,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
-        );
-      },
-    ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: colorForPriority(view.severity),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              view.severity.replaceAll('_', ' '),
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      if (view.description != null && view.description!.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(view.description!),
+        ),
+      _detail('Classified as', view.type.toLowerCase()),
+      _detail('Status', view.status.toLowerCase()),
+      _detail(
+        'People affected',
+        view.peopleAffected?.toString() ?? 'not stated — nobody guessed one',
+      ),
+      _detail(
+        'Confidence',
+        '${(view.confidence * 100).round()}% from '
+            '${view.sourceCount} source(s)',
+      ),
+      if (view.recommendedResponder != null)
+        _detail('Responder assigned', view.recommendedResponder!),
+      if (view.wasFused)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+            '${view.sourceCount} people reported this event. They were '
+            'combined into one incident so the command centre sees it '
+            'once.',
+            style: const TextStyle(
+              fontSize: 12,
+              color: AvertisColors.textSecondary,
+            ),
+          ),
+        ),
+    ],
   );
 }
 
