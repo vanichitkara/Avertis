@@ -2,6 +2,7 @@
 
     python -m avertis_sim list
     python -m avertis_sim run relay_failure --replay out/relay.jsonl
+    python -m avertis_sim run response_adaptation --api URL --api-key K --pace 12
     python -m avertis_sim run all
     python -m avertis_sim benchmark --nodes 200
     python -m avertis_sim replay out/relay.jsonl
@@ -30,6 +31,12 @@ def cmd_list(args: argparse.Namespace) -> int:
 def _backend(args: argparse.Namespace):
     if getattr(args, "api", None):
         print(f"→ syncing to backend at {args.api}")
+        if not getattr(args, "pace", 0.0):
+            # Easy to miss, and the result looks like the feature is
+            # broken rather than too fast: every state lands inside one
+            # dashboard poll and only the last one is ever seen.
+            print("  (no --pace, so all of this arrives at once — add "
+                  "--pace 12 to watch it change)")
         return HttpBackend(args.api, api_key=getattr(args, "api_key", "") or "")
     return InMemoryBackend()
 
@@ -42,7 +49,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         except KeyError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        scenario = cls(seed=args.seed, backend=_backend(args))
+        scenario = cls(seed=args.seed, backend=_backend(args),
+                       pace_seconds=getattr(args, "pace", 0.0) or 0.0)
         replay = args.replay
         if replay and len(keys) > 1:
             replay = str(Path(replay).with_name(f"{key}.jsonl"))
@@ -90,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--json", help="write results as JSON here")
     run.add_argument("--api", help="POST to a real backend, e.g. http://localhost:8000")
     run.add_argument("--api-key", default="")
+    run.add_argument(
+        "--pace", type=float, default=0.0, metavar="SECONDS",
+        help="hold this many real seconds after each connectivity window, "
+             "so the command centre can be watched rather than only read "
+             "afterwards (try 12 with --api)",
+    )
     run.set_defaults(func=cmd_run)
 
     bench = sub.add_parser("benchmark", help="baseline vs Avertis resilience")

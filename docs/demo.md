@@ -31,6 +31,13 @@ Toolchain notes that cost me time, so they are written down:
 cd simulator && .venv/bin/python -m avertis_sim run response_adaptation
 ```
 
+Add `--api <url> --api-key <key> --pace 12` to run it against a real
+backend and watch it on the command centre instead of reading it here. The
+scenario syncs each state as it reaches it, so the dashboard's own
+recommendation moves A → B → A. `--pace` is not optional for that: the
+whole run takes 0.2 s otherwise, every state arrives inside one dashboard
+poll, and only the last one is ever seen.
+
 Nothing physical moves. The responders stay where they are, the hazards do not
 change, the incident does not change. A single relay dies, and the recommended
 responder flips:

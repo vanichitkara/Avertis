@@ -253,7 +253,14 @@ class ResponseAdaptationScenario(Scenario):
         # And the loop closes in the other direction.
         self.recorder.mark(world, "RELAY R7 RESTORED")
         world.revive_node("R7", battery=0.95)
-        world.run_for(30)
+        # Long enough for the *gateway* to see the recovery, not just for
+        # this process to compute it. The two are not the same: at 30s the
+        # simulator's own selector already put Responder A back at 99%,
+        # while the link stability gw-01 could actually report still had A
+        # behind B — so the backend, and therefore the command centre, did
+        # not close the loop. The finding below claimed a recovery that
+        # nothing outside this process could observe.
+        world.run_for(120)
         restored = self.recommend("node-inc", "INC-142")
         # And the recovery, so the loop closes on screen too.
         self.open_gateway_window("gw-01", 20)

@@ -95,15 +95,28 @@ in `_merge` (`incident.py:252`), so a calmer later report cannot walk back
 
 ## 1:32 – 2:20 · The signature demo (105 words + 10s silence)
 
-Screen recording. Terminal beside the browser.
+Screen recording. Terminal beside the browser — and the scenario drives
+the **live command centre**, so both halves of the frame move together:
 
 ```bash
-cd simulator && .venv/bin/python -m avertis_sim run response_adaptation
+cd simulator && .venv/bin/python -m avertis_sim run response_adaptation \
+  --api https://avertis.web.app --api-key "$(../tool/write-key.sh)" --pace 12
 ```
 
-It completes in about **0.2 seconds** — far too fast to read on camera.
-Record it once, then cut to the lines that carry the argument and hold each
-long enough to read.
+The scenario syncs each state to the backend as it goes — healthy, then
+partitioned, then recovered — so the dashboard's own recommendation moves
+from A to B and back, with Gemini writing each explanation. That is far
+stronger than terminal text: the judge sees the product change its mind,
+not a log claiming it did.
+
+`--pace` is what makes it filmable. Without it the whole scenario runs in
+**0.2 seconds**, every state lands inside one 2-second dashboard poll, and
+only the final answer is ever visible. Twelve seconds a window gives you
+about a minute of run and time to narrate each step.
+
+Keep the terminal in shot for the `distance_only` line — the baseline
+contrast has no equivalent on the dashboard, because the dashboard only
+ever shows the right answer.
 
 > "Now the part that makes Avertis different. One incident, two responders.
 > Responder A is two hundred metres away, Responder B three hundred. On a
@@ -187,7 +200,10 @@ End on `https://avertis.web.app` — the plain URL, never the `?key=` form.
       what else it is doing.
 - [ ] Check the gateway's Mesh screen shows non-zero packets decoded before
       you roll. That one number is the whole relay.
-- [ ] Pre-run the simulator scenario and the benchmark; have both captured.
+- [ ] Decide whether the scenario drives the live board (`--api --pace 12`)
+      or runs offline. If live, run it once beforehand to confirm it lands,
+      then `./tool/reset-demo.sh` again so the recording starts clean.
+- [ ] Pre-run the benchmark; have the output captured.
 
 ## What not to film
 

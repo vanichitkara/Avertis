@@ -79,8 +79,19 @@ class Scenario:
     seed = 42
 
     def __init__(self, seed: int | None = None,
-                 backend: SyncBackend | None = None):
+                 backend: SyncBackend | None = None,
+                 pace_seconds: float = 0.0):
         self.seed = seed if seed is not None else self.seed
+        #: Real seconds to hold after each connectivity window.
+        #:
+        #: A scenario runs in a fifth of a second, which is right for a
+        #: test and useless for a demonstration: every state it syncs
+        #: lands within one dashboard poll, so an operator watching the
+        #: command centre sees only the final answer and none of the
+        #: change. The whole argument of §7 is watching the
+        #: recommendation move, so live runs hold each state on screen
+        #: long enough to be read.
+        self.pace_seconds = pace_seconds
         self.world: World = None       # type: ignore[assignment]
         self.pool = ResponderPool()
         self.generator: IncidentGenerator = None  # type: ignore[assignment]
@@ -169,7 +180,25 @@ class Scenario:
         result = client.sync(seconds)
         self.world.run_for(seconds)
         self.world.set_internet(gateway_id, False)
+        if self.pace_seconds > 0:
+            self._hold(result)
         return result
+
+    def _hold(self, result: "SyncResult") -> None:
+        """Let the board catch up, and say what it is showing."""
+        import sys
+        import time
+
+        what = (f"{result.accepted} report(s)" if result.accepted
+                else "topology")
+        print(f"    ↑ synced {what} — holding "
+              f"{self.pace_seconds:.0f}s so the board can be read",
+              flush=True)
+        # Printed before the wait, not after, so somebody switching to the
+        # browser knows what they are about to see rather than finding out
+        # once it has already changed.
+        sys.stdout.flush()
+        time.sleep(self.pace_seconds)
 
     def finish(self, replay_path: str | None = None) -> ScenarioResult:
         self.world.bus.emit(Event("SCENARIO_ENDED", self.world.now(),
