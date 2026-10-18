@@ -101,6 +101,45 @@ class HttpSyncBackend implements SyncBackend {
   }
 }
 
+/// A sync failure in words someone can act on.
+///
+/// `error.toString()` on a Dio exception is a paragraph of stack-adjacent
+/// detail that ends up in front of a survivor, and the one case that
+/// matters most — the build has no API key, so every write is refused —
+/// reads identically to a timeout. The status code is the whole story
+/// here, so say what it means.
+String describeSyncFailure(Object error) {
+  if (error is! DioException) return error.toString();
+
+  final status = error.response?.statusCode;
+  switch (status) {
+    case 401:
+    case 403:
+      return 'the command centre rejected this app\'s credentials '
+          '(HTTP $status) — this build is missing its API key';
+    case 413:
+      return 'the batch was too large for the command centre (HTTP 413)';
+    case null:
+      break;
+    default:
+      if (status >= 500) {
+        return 'the command centre returned an error (HTTP $status)';
+      }
+      return 'the command centre refused the send (HTTP $status)';
+  }
+
+  switch (error.type) {
+    case DioExceptionType.connectionTimeout:
+    case DioExceptionType.sendTimeout:
+    case DioExceptionType.receiveTimeout:
+      return 'the connection timed out before the send finished';
+    case DioExceptionType.connectionError:
+      return 'the command centre could not be reached';
+    default:
+      return error.message ?? 'the send failed';
+  }
+}
+
 class GatewayClient {
   GatewayClient({
     required this.engine,
@@ -334,7 +373,7 @@ class GatewayClient {
         accepted: 0,
         deferred: ordered.length,
         bytesSent: used,
-        error: error.toString(),
+        error: describeSyncFailure(error),
       );
     }
 

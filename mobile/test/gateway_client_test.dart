@@ -8,6 +8,7 @@
 /// a failed sync never loses a report.
 library;
 
+import 'package:dio/dio.dart';
 import 'dart:convert';
 
 import 'package:avertis/mesh/mesh_engine.dart';
@@ -539,6 +540,71 @@ void main() {
       expect(result.attempted, 0);
       expect(backend.bodies, hasLength(1),
           reason: 'a relay appearing is news even with no report attached');
+    });
+  });
+
+  /// A refused write is not a dead uplink.
+  ///
+  /// An APK built without its API key got 401 on every sync. The home
+  /// screen read `Internet OFFLINE`, so the fault looked like connectivity
+  /// and the search went to Wi-Fi settings — while the command centre was
+  /// up, answering health checks, and refusing every write.
+  group('describing a failed sync', () {
+    DioException responded(int status) => DioException(
+          requestOptions: RequestOptions(path: '/api/v1/gateway/sync'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/api/v1/gateway/sync'),
+            statusCode: status,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+
+    test('a 401 names the missing key, not the network', () {
+      final text = describeSyncFailure(responded(401));
+      expect(text, contains('API key'));
+      expect(text, contains('401'));
+      expect(text.toLowerCase(), isNot(contains('no internet')));
+    });
+
+    test('a 403 reads the same way', () {
+      expect(describeSyncFailure(responded(403)), contains('credentials'));
+    });
+
+    test('a server error is not blamed on this phone', () {
+      expect(describeSyncFailure(responded(503)), contains('HTTP 503'));
+    });
+
+    test('a timeout says so', () {
+      final text = describeSyncFailure(DioException(
+        requestOptions: RequestOptions(path: '/x'),
+        type: DioExceptionType.receiveTimeout,
+      ));
+      expect(text, contains('timed out'));
+    });
+
+    test('an unreachable backend says that', () {
+      final text = describeSyncFailure(DioException(
+        requestOptions: RequestOptions(path: '/x'),
+        type: DioExceptionType.connectionError,
+      ));
+      expect(text, contains('could not be reached'));
+    });
+
+    test('a failure carries into the result the UI reads', () async {
+      final refused = GatewayClient(
+        engine: engine,
+        backend: FakeBackend(failWith: responded(401)),
+        bus: engine.bus,
+      );
+      hold(engine, reportId: 'rpt-1', priority: Priority.lifeCritical,
+          createdAt: t0);
+
+      final result = await refused.sync(windowSeconds: 30);
+
+      expect(result.ok, isFalse);
+      expect(result.error, contains('API key'));
+      expect(result.deferred, 1, reason: 'a refused report is never dropped');
+      expect(engine.state.pendingReports, hasLength(1));
     });
   });
 }

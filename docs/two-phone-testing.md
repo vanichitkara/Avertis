@@ -41,6 +41,24 @@ cd mobile
 flutter build apk --debug --dart-define=AVERTIS_API_BASE=http://192.168.1.165:8000
 ```
 
+Against **Cloud Run** rather than a laptop, pass the write key as well:
+
+```bash
+cd ~/Documents/Avertis
+KEY=$(./tool/write-key.sh)
+cd mobile
+flutter build apk --release --split-per-abi \
+  --dart-define=AVERTIS_API_BASE=https://avertis-687930058257.asia-south1.run.app \
+  --dart-define=AVERTIS_API_KEY="$KEY"
+```
+
+**Leave the key out and nothing syncs.** Reads are open, writes are not, so
+the health check passes, the home screen can look healthy, and every sync
+comes back 401. The app now names that case — "the command centre rejected
+this app's credentials … this build is missing its API key" — rather than
+reporting it as no internet, which is what it used to do and what sent a
+whole afternoon into Wi-Fi settings.
+
 Requirements for that to work:
 
 - The Mac and both phones on **the same Wi-Fi** (not a guest network, which

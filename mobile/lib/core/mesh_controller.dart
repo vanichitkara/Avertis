@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../data/report_store.dart';
@@ -191,8 +192,18 @@ class MeshController extends ChangeNotifier {
               'sends automatically as soon as either appears.';
     }
 
+    final failure = _lastSyncError;
+    if (failure != null) {
+      // The uplink is fine and the command centre answered — it just would
+      // not take this. Saying "no internet" here would send someone to
+      // look for a signal they already have.
+      return 'The command centre is reachable but refused the last send: '
+          '$failure. Your report is still here and will go when that is '
+          'fixed.';
+    }
+
     return 'Connected — sending at the next window, within about 20 '
-        'seconds. If it stays here, the command centre is rejecting it.';
+        'seconds.';
   }
 
   /// Why this node is not discoverable, when it is not.
@@ -214,9 +225,20 @@ class MeshController extends ChangeNotifier {
   bool _disposed = false;
   String? _lastServiceFingerprint;
 
-  /// Set by the gateway client / connectivity check. Offline is the default
-  /// assumption — this app exists for when there is no internet.
+  /// Set by the connectivity check, and by nothing else. Offline is the
+  /// default assumption — this app exists for when there is no internet.
   bool _internetOnline = false;
+
+  /// Why the last sync failed, when it did and the backend was reachable.
+  ///
+  /// A refused write is not a dead uplink. Folding the two together cost
+  /// an afternoon of looking at Wi-Fi settings while the real fault was an
+  /// APK built without its API key: every sync came back 401, the home
+  /// screen read `Internet OFFLINE`, and nothing on the phone said
+  /// otherwise. Reachability is what the health check saw; this is what
+  /// happened when we tried to write.
+  String? _lastSyncError;
+  String? get lastSyncError => _lastSyncError;
 
   /// What we actually know about our position. The UI reads this rather than
   /// assuming a fix exists — claiming a location we do not have would send
@@ -233,6 +255,20 @@ class MeshController extends ChangeNotifier {
   bool backgroundRelayActive = false;
 
   Timer? _reachabilityTimer;
+
+  final Battery _battery = Battery();
+  Timer? _batteryTimer;
+
+  /// True once a real battery reading has landed. Until then the node's
+  /// battery is a default, not a measurement, and nothing should present
+  /// it as one.
+  bool _batteryKnown = false;
+  bool get batteryKnown => _batteryKnown;
+  String? _batteryError;
+  String? get batteryError => _batteryError;
+
+  /// Battery moves slowly; a minute is often enough to be honest about.
+  static const Duration batteryInterval = Duration(minutes: 1);
   bool _syncInFlight = false;
 
   /// How often to ask whether the command centre can be reached.
@@ -300,6 +336,7 @@ class MeshController extends ChangeNotifier {
     // service without a Bluetooth runtime permission, so starting it blindly
     // would either fail silently or crash the app.
     unawaited(_startBackgroundRelay());
+    unawaited(_trackBattery());
     _statusTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _refreshStatus());
 
@@ -350,7 +387,7 @@ class MeshController extends ChangeNotifier {
     for (final entry in result.incidentByReport.entries) {
       await database.attachIncidentId(entry.key, entry.value);
     }
-    _internetOnline = result.ok;
+    _lastSyncError = result.error;
     if (!_disposed) notifyListeners();
     return result;
   }
@@ -496,8 +533,45 @@ class MeshController extends ChangeNotifier {
   }
 
   void updateBattery(double battery) {
-    _engine?.state.battery = battery;
+    _engine?.state.battery = battery.clamp(0.0, 1.0);
     _refreshStatus();
+  }
+
+  /// Keep the node's battery level true.
+  ///
+  /// It defaulted to 1.0 and nothing ever moved it, so every phone
+  /// reported 100% charged for as long as it ran — on its own screen, to
+  /// its neighbours in every beacon, and to the command centre. Relay
+  /// election weights battery (see relay_policy.dart), so a constant made
+  /// that part of the scoring decorative: the phone about to die looked
+  /// exactly as good a relay as the one on charge.
+  ///
+  /// Polled rather than streamed. `onBatteryStateChanged` fires on
+  /// charging transitions, not on the level moving, which is the number
+  /// this needs.
+  Future<void> _trackBattery() async {
+    Future<void> read() async {
+      try {
+        final percent = await _battery.batteryLevel;
+        if (_disposed) return;
+        updateBattery(percent / 100);
+        _batteryKnown = true;
+      } catch (error) {
+        // A platform that will not say leaves the last known value alone,
+        // but it does not get to fail quietly: a silent catch here is why
+        // the screen sat at 100% with nothing to explain it.
+        _batteryKnown = false;
+        if (_batteryError == null) {
+          debugPrint('avertis: cannot read the battery level ($error); '
+              'the reported figure is not measured');
+        }
+        _batteryError = error.toString();
+      }
+    }
+
+    await read();
+    _batteryTimer =
+        Timer.periodic(batteryInterval, (_) => unawaited(read()));
   }
 
   /// The engine, or an error a person can act on.
@@ -565,6 +639,7 @@ class MeshController extends ChangeNotifier {
     _disposed = true;
     _statusTimer?.cancel();
     _reachabilityTimer?.cancel();
+    _batteryTimer?.cancel();
     unawaited(_locationSub?.cancel());
     unawaited(locationService.dispose());
     unawaited(meshService.stop());
