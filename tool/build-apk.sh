@@ -18,6 +18,20 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 API=${AVERTIS_API_BASE:-https://avertis-687930058257.asia-south1.run.app}
 
+# A non-interactive shell does not get the login PATH, so find the SDK
+# rather than assuming it is there. $FLUTTER overrides.
+FLUTTER=${FLUTTER:-$(command -v flutter || true)}
+for candidate in "$HOME/development/flutter/bin/flutter" \
+                 "$HOME/flutter/bin/flutter" \
+                 /opt/homebrew/bin/flutter; do
+  [ -n "$FLUTTER" ] && break
+  [ -x "$candidate" ] && FLUTTER=$candidate
+done
+if [ -z "$FLUTTER" ]; then
+  echo "cannot find the flutter SDK; set FLUTTER=/path/to/bin/flutter" >&2
+  exit 1
+fi
+
 KEY=$("$ROOT/tool/write-key.sh")
 if [ -z "$KEY" ]; then
   echo "could not read the write key; an APK without it cannot sync" >&2
@@ -32,7 +46,7 @@ sed -i '' -E "s/^(version: [0-9.]+)\+[0-9]+$/\1+$NEXT/" "$PUBSPEC"
 echo "build number $CURRENT -> $NEXT"
 
 cd "$ROOT/mobile"
-flutter build apk --release --split-per-abi \
+"$FLUTTER" build apk --release --split-per-abi \
   --dart-define=AVERTIS_API_BASE="$API" \
   --dart-define=AVERTIS_API_KEY="$KEY"
 

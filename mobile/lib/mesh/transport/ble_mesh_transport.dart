@@ -187,13 +187,26 @@ class BlePeerIdentityMap {
     }
   }
 
+  /// The node id a link is known by, or the link id itself until a HELLO
+  /// has named it.
   String nodeIdFor(String linkId) => _nodeIdByLinkId[linkId] ?? linkId;
 
-  String? linkIdFor(String nodeId) {
+  /// The link a node is reachable on. The exact inverse of [nodeIdFor],
+  /// including the unlearned case, and it has to be.
+  ///
+  /// This returned null for an unlearned peer while [nodeIdFor] returned
+  /// the link id, so the two stopped being inverses before the first
+  /// HELLO. `peers` listed an inbound peer by its device address, `send`
+  /// looked that address up as a node id, found nothing, and refused to
+  /// send. Since the only way to learn a mapping is to *receive* a HELLO,
+  /// and the only way to be sent one is to already be mapped, two phones
+  /// that had connected to each other both sat waiting for a beacon
+  /// neither could send: a live BLE link, and zero neighbours on both.
+  String linkIdFor(String nodeId) {
     for (final entry in _nodeIdByLinkId.entries) {
       if (entry.value == nodeId) return entry.key;
     }
-    return null;
+    return nodeId;
   }
 
   String remove(String linkId) => _nodeIdByLinkId.remove(linkId) ?? linkId;
@@ -447,7 +460,7 @@ class BleMeshTransport extends MeshTransport {
     // The peer connected to us, so answer it over our own notify
     // characteristic instead of dialling back.
     final inboundLinkId = _peerIds.linkIdFor(toNode);
-    if (inboundLinkId != null && _inboundPeers.contains(inboundLinkId)) {
+    if (_inboundPeers.contains(inboundLinkId)) {
       return peripheral.send(
         inboundLinkId,
         Uint8List.fromList(packet.encode()),

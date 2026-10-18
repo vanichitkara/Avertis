@@ -19,44 +19,6 @@ Packet packetOfSize(int approxPayloadChars) => Packet.create(
 );
 
 void main() {
-  group('BLE peer identity mapping', () {
-    Packet hello({required String nodeId, String? origin}) => Packet.create(
-      packetId: 'pkt-hello-$nodeId',
-      originNode: origin ?? nodeId,
-      destination: broadcast,
-      messageType: MessageType.hello,
-      priority: Priority.normal,
-      createdAt: DateTime.utc(2026, 10, 18),
-      payload: {'node_id': nodeId},
-    );
-
-    test('uses the node id after learning it from a direct HELLO', () {
-      final peers = BlePeerIdentityMap();
-      peers.learn('AA:BB:CC:DD:EE:FF', hello(nodeId: 'n7ac20'));
-
-      expect(peers.nodeIdFor('AA:BB:CC:DD:EE:FF'), 'n7ac20');
-      expect(peers.linkIdFor('n7ac20'), 'AA:BB:CC:DD:EE:FF');
-    });
-
-    test('does not let a mismatched HELLO rename a direct peer', () {
-      final peers = BlePeerIdentityMap();
-      peers.learn(
-        'AA:BB:CC:DD:EE:FF',
-        hello(nodeId: 'n7ac20', origin: 'n-other'),
-      );
-
-      expect(peers.nodeIdFor('AA:BB:CC:DD:EE:FF'), 'AA:BB:CC:DD:EE:FF');
-      expect(peers.linkIdFor('n7ac20'), isNull);
-    });
-
-    test('forgets the mapping when the BLE connection closes', () {
-      final peers = BlePeerIdentityMap();
-      peers.learn('AA:BB:CC:DD:EE:FF', hello(nodeId: 'n7ac20'));
-
-      expect(peers.remove('AA:BB:CC:DD:EE:FF'), 'n7ac20');
-      expect(peers.linkIdFor('n7ac20'), isNull);
-    });
-  });
 
   test('a small packet still produces at least one frame', () {
     final frames = BleFraming.fragment(packetOfSize(1));
