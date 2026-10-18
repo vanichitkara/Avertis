@@ -66,7 +66,13 @@ class Coordinator:
             },
             "network": {
                 **view.summary(),
-                "nodes": [n.model_dump(mode="json") for n in self.store.list_nodes()],
+                # From the view, not the store. The view is where staleness
+                # is applied, and taking the raw snapshots here meant the
+                # summary counted three nodes as gone quiet while every one
+                # of them still carried reachable=true — so a dashboard
+                # reading the per-node flag drew a live mesh that had been
+                # silent for hours.
+                "nodes": [n.model_dump(mode="json") for n in view.nodes.values()],
                 "links": [l.model_dump(mode="json") for l in self.store.list_links()],
                 "partition_of": {
                     node_id: view.partition_of(node_id)

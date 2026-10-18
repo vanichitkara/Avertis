@@ -294,3 +294,84 @@ canvas {
 .empty, .muted { color: var(--text-dim); }
 .small { font-size: 11px; }
 footer { padding: 14px 20px; border-top: 1px solid var(--outline); }
+
+/* -- topology -- */
+
+.topology-wrap { position: relative; }
+
+#topology, #topology-large {
+  width: 100%; display: block; cursor: default;
+}
+
+/* Floating over the canvas rather than below it: a readout that pushes the
+   page around every time the pointer crosses a node is worse than none. */
+.topology-tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: rgba(10, 13, 18, 0.96);
+  border: 1px solid var(--outline); border-radius: 6px;
+  padding: 7px 9px; font-size: 11px; line-height: 1.5;
+  color: var(--text); max-width: 230px;
+}
+
+.expand-button {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(10, 13, 18, 0.9); color: var(--text-dim);
+  border: 1px solid var(--outline); border-radius: 6px;
+  padding: 3px 9px; font-size: 11px; letter-spacing: 0.5px; cursor: pointer;
+}
+.expand-button:hover { color: var(--text); border-color: var(--mesh); }
+
+.node-detail { margin-top: 10px; }
+.node-title {
+  margin: 0 0 8px; font-size: 13px; letter-spacing: 1px;
+  font-family: ui-monospace, monospace;
+}
+.node-facts {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 14px;
+  font-size: 12px; margin-bottom: 8px;
+}
+.node-fact { display: contents; }
+.node-fact .k { color: var(--text-dim); }
+.node-fact .v { color: var(--text); }
+
+/* -- the expanded topology -- */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(4, 6, 9, 0.82);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.overlay[hidden] { display: none; }
+
+.overlay-panel {
+  background: var(--panel); border: 1px solid var(--outline);
+  border-radius: 10px; padding: 18px;
+  width: min(1200px, 100%); max-height: 92vh; overflow: auto;
+}
+.overlay-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.overlay-head h2 { margin: 0; }
+
+body.no-scroll { overflow: hidden; }
+
+/* Without this the markers are a private language: dashed versus solid
+   and a hole in the middle mean nothing to someone seeing the page for
+   the first time. */
+.legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.key {
+  width: 11px; height: 11px; border-radius: 50%;
+  display: inline-block; flex: 0 0 auto;
+}
+.key-solid { background: var(--mesh); border: 2px solid var(--mesh); }
+.key-dashed { background: transparent; border: 2px dashed var(--mesh); }
+.key-gateway {
+  background: transparent;
+  border: 3px solid var(--mesh);
+}
+
+/* Each swatch stays with its label: a legend that wraps between the two
+   explains nothing. */
+.key-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend { gap: 4px 14px; }

@@ -453,6 +453,42 @@ class TestStaleNodes:
         assert summary["nodes_reachable"] == 1
         assert summary["nodes_stale"] == 1
 
+    def test_the_world_agrees_with_its_own_summary(self):
+        # /world used to take its summary from the view and its node list
+        # straight from the store, so the headline said three nodes had
+        # gone quiet while every node in the list carried reachable=true.
+        # A dashboard reading the per-node flag drew a live mesh that had
+        # been silent for hours.
+        import datetime as dt
+        from avertis_backend.agents.coordinator import Coordinator
+        from avertis_backend.llm.deterministic import DeterministicReasoner
+        from avertis_backend.models import NodeSnapshot
+
+        now = dt.datetime.now(dt.timezone.utc)
+        store = MemoryStore()
+        store.replace_network(
+            "gw",
+            [NodeSnapshot(node_id="fresh"), NodeSnapshot(node_id="gone")],
+            [],
+        )
+        # Age one of them past the staleness window.
+        held = store._nodes_by_gateway["gw"]
+        held["gone"] = held["gone"].model_copy(
+            update={"received_at": now - dt.timedelta(hours=2)}
+        )
+
+        world = Coordinator(DeterministicReasoner(), store).world()
+        network = world["network"]
+        by_id = {n["node_id"]: n for n in network["nodes"]}
+
+        assert network["nodes_stale"] == 1
+        assert by_id["gone"]["reachable"] is False
+        assert by_id["fresh"]["reachable"] is True
+        assert (
+            sum(1 for n in network["nodes"] if n["reachable"])
+            == network["nodes_reachable"]
+        )
+
 
 class TestNodeProvenance:
     """A handset and a simulated node must be distinguishable.

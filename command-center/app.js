@@ -43,6 +43,11 @@ const state = {
   // incident — expanding one should not silently expand the next.
   evidenceOpen: false,
   alternativesOpen: false,
+  // Which node the operator is inspecting, and whether the topology is
+  // open full-size. A mesh of dots a few pixels apart is unreadable in a
+  // column; the expanded view is where it becomes a diagram.
+  selectedNode: null,
+  topologyExpanded: false,
   // The last payload, kept so filtering and replay redraw from memory.
   // Re-fetching five endpoints on every keystroke made typing feel like
   // the page was struggling, for work that is entirely local.
@@ -226,64 +231,258 @@ function renderNetwork(network) {
           `${all.length - devices.length} simulated`
         : "");
   }
-  drawTopology({ ...network, nodes: shown,
+  const view = {
+    ...network,
+    nodes: shown,
     links: (network.links || []).filter(
       (l) => shownIds.has(l.a) && shownIds.has(l.b)
-    ) });
+    ),
+  };
+  // Kept so the expanded view and the node panel work from exactly what
+  // the canvas drew, filter included.
+  state.networkView = view;
+
+  const spread = drawTopology(view, el("topology"));
+  if (spread) note.textContent = `${note.textContent} · ${spread}`;
+
+  if (state.topologyExpanded) {
+    drawTopology(view, el("topology-large"), {
+      height: Math.max(420, Math.round(window.innerHeight * 0.6)),
+    });
+    el("topology-large-note").textContent = note.textContent;
+  }
+
+  // A node can disappear between polls — a filter change, or it stopped
+  // being reported. Drop the selection rather than showing a stale card.
+  if (state.selectedNode && !shownIds.has(state.selectedNode)) {
+    state.selectedNode = null;
+  }
+  const selected = shown.find((n) => n.node_id === state.selectedNode) || null;
+  renderNodeDetail(el("node-detail"), selected, view);
 }
 
 const PARTITION_COLOURS = [
   "#3da5ff", "#ff8a3d", "#00d9a3", "#c77dff", "#ffc53d", "#ff4438",
 ];
 
-function drawTopology(network) {
-  const canvas = el("topology");
-  const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
-  ctx.clearRect(0, 0, width, height);
+/// Distance in metres between two reported positions (haversine).
+function metresBetween(a, b) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
 
+/// Where each node goes, and what had to be done to make it visible.
+///
+/// Geography first, because the picture should match the ground. But
+/// phones in one building are metres apart, and metres apart at this
+/// scale is the same pixel: four of five nodes drew on top of each other
+/// and the operator saw one blob. So after placing them, markers that
+/// still collide are pushed apart.
+///
+/// The nudging is reported rather than hidden. A map that silently moves
+/// things is worse than one that says it had to: "spread apart to be
+/// legible — they are within 12 m of each other" tells the operator both
+/// that the layout is approximate and the real figure.
+function layoutTopology(network, width, height, radiusOf, extentOf) {
   const nodes = network.nodes || [];
-  if (nodes.length === 0) return;
-
-  // Lay nodes out by geography when they report it, so the picture matches
-  // the ground. Otherwise fall back to a circle — a made-up position would
-  // imply knowledge we do not have.
-  const located = nodes.filter((n) => n.location);
   const positions = {};
-  const pad = 28;
+  const pad = 34;
+  if (nodes.length === 0) return { positions, note: "" };
+
+  const located = nodes.filter((n) => n.location);
+  const onCircle = (i, n) => {
+    const angle = (i / Math.max(n, 1)) * Math.PI * 2 - Math.PI / 2;
+    const rx = (width - 2 * pad) / 2;
+    const ry = (height - 2 * pad) / 2;
+    return {
+      x: width / 2 + Math.cos(angle) * rx,
+      y: height / 2 + Math.sin(angle) * ry,
+    };
+  };
 
   if (located.length >= 2) {
     const lats = located.map((n) => n.location.lat);
     const lons = located.map((n) => n.location.lon);
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-    const spanLat = maxLat - minLat || 1e-6;
-    const spanLon = maxLon - minLon || 1e-6;
+    const spanLat = maxLat - minLat || 1e-9;
+    const spanLon = maxLon - minLon || 1e-9;
 
-    nodes.forEach((n, i) => {
+    let unlocated = 0;
+    const unlocatedTotal = nodes.length - located.length;
+    nodes.forEach((n) => {
       if (n.location) {
         positions[n.node_id] = {
           x: pad + ((n.location.lon - minLon) / spanLon) * (width - 2 * pad),
           // North is up, so latitude inverts against screen y.
           y: pad + (1 - (n.location.lat - minLat) / spanLat) * (height - 2 * pad),
+          located: true,
         };
       } else {
-        const angle = (i / nodes.length) * Math.PI * 2;
+        // Nodes with no position go along the bottom, kept clear of the
+        // mapped ones so their placement is never read as a location.
+        const slot = (unlocated + 1) / (unlocatedTotal + 1);
         positions[n.node_id] = {
-          x: width / 2 + Math.cos(angle) * (width / 2 - pad),
-          y: height / 2 + Math.sin(angle) * (height / 2 - pad),
+          x: pad + slot * (width - 2 * pad),
+          y: height - pad / 2,
+          located: false,
         };
+        unlocated += 1;
       }
     });
   } else {
     nodes.forEach((n, i) => {
-      const angle = (i / nodes.length) * Math.PI * 2;
-      positions[n.node_id] = {
-        x: width / 2 + Math.cos(angle) * (width / 2 - pad),
-        y: height / 2 + Math.sin(angle) * (height / 2 - pad),
-      };
+      positions[n.node_id] = { ...onCircle(i, nodes.length), located: false };
     });
   }
+
+  // Push overlapping markers apart. What has to clear is not the dot but
+  // the dot *and its label*: six monospace characters are far wider than
+  // the marker, so separating on radius alone left names written over one
+  // another. Each node therefore claims an ellipse — wide enough for its
+  // label, tall enough for the lines under it — and pairs are relaxed in
+  // that normalised space.
+  //
+  // A handful of passes is plenty for the node counts this ever shows,
+  // and the result is deterministic, so the picture does not jitter
+  // between polls.
+  let moved = 0;
+  let closestMetres = Infinity;
+  for (let pass = 0; pass < 80; pass++) {
+    let shifted = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = positions[nodes[i].node_id];
+        const b = positions[nodes[j].node_id];
+        if (!a || !b) continue;
+        const ea = extentOf(nodes[i]);
+        const eb = extentOf(nodes[j]);
+        const rx = ea.x + eb.x;
+        const ry = ea.y + eb.y;
+
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d = Math.hypot(dx / rx, dy / ry);
+        if (d >= 1) continue;
+        if (d < 0.001) {
+          // Exactly coincident: separate along a fixed angle per pair so
+          // the outcome is stable rather than flickering each frame.
+          const angle = ((i * 97 + j * 53) % 360) * (Math.PI / 180);
+          dx = Math.cos(angle) * rx;
+          dy = Math.sin(angle) * ry;
+          d = 0.001;
+        }
+        // Move each endpoint half the shortfall, in real pixels.
+        const scale = (1 - d) / 2;
+        a.x -= dx * scale; a.y -= dy * scale;
+        b.x += dx * scale; b.y += dy * scale;
+        shifted = true;
+        if (pass === 0) {
+          moved++;
+          if (nodes[i].location && nodes[j].location) {
+            closestMetres = Math.min(
+              closestMetres,
+              metresBetween(nodes[i].location, nodes[j].location)
+            );
+          }
+        }
+      }
+    }
+    for (const node of nodes) {
+      const p = positions[node.node_id];
+      if (!p) continue;
+      const e = extentOf(node);
+      p.x = Math.min(width - e.x, Math.max(e.x, p.x));
+      p.y = Math.min(height - e.y, Math.max(radiusOf(node) + 6, p.y));
+    }
+    if (!shifted) break;
+  }
+
+  let note = "";
+  if (moved > 0) {
+    note = Number.isFinite(closestMetres)
+      ? `Markers spread apart to stay legible — the closest pair is about ` +
+        `${closestMetres < 1 ? "under a metre" : Math.round(closestMetres) + " m"} ` +
+        `apart on the ground.`
+      : "Markers spread apart to stay legible.";
+  }
+  return { positions, note };
+}
+
+/// The second line under a node in the expanded view. Shared with the
+/// layout, because the text it has to clear is wider than the node id and
+/// clamping on the id alone cropped "survivor" to "urvivor" at the edge.
+function nodeSubtitle(node) {
+  const bits = [node.role.toLowerCase()];
+  if (node.source === "DEVICE") bits.push("device");
+  if (!node.reachable) bits.push("gone quiet");
+  return bits.join(" · ");
+}
+
+function nodeRadius(node) {
+  if (node.role === "GATEWAY") return 11;
+  if (node.role === "RESPONDER") return 9;
+  return 7;
+}
+
+/// What is under the pointer, so hover and click agree with what is drawn.
+const hitRegions = new WeakMap();
+
+function drawTopology(network, canvas, opts = {}) {
+  canvas = canvas || el("topology");
+  const ctx = canvas.getContext("2d");
+
+  // Match the backing store to the element's real size in device pixels.
+  // It was a fixed 560x320 stretched by CSS to whatever width the column
+  // happened to be, which is why everything looked soft.
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 560;
+  const cssHeight = opts.height || Math.round(cssWidth * 0.58);
+  if (canvas.style.height !== `${cssHeight}px`) {
+    canvas.style.height = `${cssHeight}px`;
+  }
+  const pxWidth = Math.round(cssWidth * dpr);
+  const pxHeight = Math.round(cssHeight * dpr);
+  if (canvas.width !== pxWidth || canvas.height !== pxHeight) {
+    canvas.width = pxWidth;
+    canvas.height = pxHeight;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const nodes = network.nodes || [];
+  hitRegions.set(canvas, []);
+  if (nodes.length === 0) return "";
+
+  const big = cssWidth > 700;
+  const radiusOf = (n) => nodeRadius(n) * (big ? 1.25 : 1);
+
+  // How much room a node needs around its centre, label included. The id
+  // is monospace, so its width is predictable from its length without
+  // measuring every frame.
+  const labelPx = big ? 13 : 11;
+  const charPx = labelPx * 0.62;
+  const subPx = 11 * 0.52;
+  const extentOf = (n) => ({
+    x:
+      Math.max(
+        radiusOf(n),
+        (n.node_id.length * charPx) / 2,
+        big ? (nodeSubtitle(n).length * subPx) / 2 : 0
+      ) + 10,
+    y: radiusOf(n) + labelPx + (big ? 18 : 2) + 10,
+  });
+
+  const { positions, note } =
+    layoutTopology(network, cssWidth, cssHeight, radiusOf, extentOf);
 
   // Links first, so nodes sit on top. Thickness and opacity carry stability.
   for (const link of network.links || []) {
@@ -293,12 +492,24 @@ function drawTopology(network) {
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = `rgba(136,151,168,${0.15 + link.stability * 0.6})`;
-    ctx.lineWidth = 0.5 + link.stability * 2.5;
+    ctx.strokeStyle = `rgba(136,151,168,${0.25 + link.stability * 0.6})`;
+    ctx.lineWidth = 1 + link.stability * 3;
     ctx.stroke();
+
+    if (big) {
+      // There is room at this size to say how good the link is, which is
+      // the number the responder recommendation actually turns on.
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      ctx.fillStyle = "#6b7a8f";
+      ctx.font = "11px ui-monospace, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${Math.round(link.stability * 100)}%`, mx, my - 5);
+    }
   }
 
   const partitionOf = network.partition_of || {};
+  const regions = [];
   for (const node of nodes) {
     const p = positions[node.node_id];
     if (!p) continue;
@@ -308,24 +519,163 @@ function drawTopology(network) {
         ? "#6b7a8f"
         : PARTITION_COLOURS[partition % PARTITION_COLOURS.length];
 
-    const isGateway = node.role === "GATEWAY";
-    const radius = isGateway ? 8 : node.role === "RESPONDER" ? 7 : 5;
+    const radius = radiusOf(node);
+    const selected = state.selectedNode === node.node_id;
 
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Two things have to be readable at a glance, and they must not be
+    // confusable with each other: whether a node is still being heard
+    // from, and whether it is a gateway.
+    //
+    // Hollow meant "gone quiet" and a gateway was drawn as a ring, so a
+    // live gateway and a silent survivor looked the same. Reachability is
+    // now carried by the outline — solid for heard-from, dashed for
+    // not — which nothing else uses.
     ctx.beginPath();
     ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = node.reachable ? colour : "#0a0d12";
     ctx.fill();
+    ctx.setLineDash(node.reachable ? [] : [3, 3]);
     ctx.strokeStyle = colour;
     ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.setLineDash([]);
 
-    if (isGateway || node.role === "RESPONDER") {
-      ctx.fillStyle = "#8b97a8";
-      ctx.font = "9px ui-sans-serif, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(node.node_id, p.x, p.y + radius + 11);
+    // A gateway is the way out of the mesh, so it earns a mark of its
+    // own: a hole through the middle, which only reads on a filled
+    // marker and so never collides with the dashed outline above.
+    if (node.role === "GATEWAY" && node.reachable) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius - 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = "#0a0d12";
+      ctx.fill();
+    } else if (node.role === "GATEWAY") {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(1.5, radius - 6), 0, Math.PI * 2);
+      ctx.fillStyle = colour;
+      ctx.fill();
+    }
+
+    // Every node is named now. Labelling only gateways and responders
+    // left most of the mesh as anonymous dots.
+    ctx.fillStyle = selected ? "#e8eef6" : "#8b97a8";
+    ctx.font = `${big ? 13 : 11}px ui-monospace, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(node.node_id, p.x, p.y + radius + 4);
+
+    if (big) {
+      ctx.fillStyle = "#6b7a8f";
+      ctx.font = "11px ui-sans-serif, sans-serif";
+      ctx.fillText(nodeSubtitle(node), p.x, p.y + radius + 20);
+    }
+
+    regions.push({ x: p.x, y: p.y, r: radius + 8, node });
+  }
+
+  hitRegions.set(canvas, regions);
+  return note;
+}
+
+function nodeAt(canvas, clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  let best = null;
+  let bestD = Infinity;
+  for (const region of hitRegions.get(canvas) || []) {
+    const d = Math.hypot(region.x - x, region.y - y);
+    if (d <= region.r && d < bestD) {
+      best = region.node;
+      bestD = d;
     }
   }
+  return best;
+}
+
+/// Everything this backend knows about one node, and nothing it does not.
+function nodeFacts(node, network) {
+  const partition = (network.partition_of || {})[node.node_id];
+  const links = (network.links || []).filter(
+    (l) => l.a === node.node_id || l.b === node.node_id
+  );
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const facts = [
+    ["Role", node.role.toLowerCase()],
+    ["Source", node.source === "DEVICE" ? "real handset" : "simulated"],
+    ["Reachable", node.reachable ? "yes" : "no — not heard from recently"],
+    [
+      "Partition",
+      partition === null || partition === undefined
+        ? "unknown"
+        : `#${partition}`,
+    ],
+    [
+      "Battery",
+      node.battery === null || node.battery === undefined
+        ? "not reported"
+        : pct(node.battery),
+    ],
+    [
+      "Hops to a gateway",
+      // A gateway is the way out, so it is never "no route" to itself —
+      // it reports no distance because the question does not apply.
+      node.role === "GATEWAY" || node.gateway_distance === 0
+        ? "it is one"
+        : node.gateway_distance === null || node.gateway_distance === undefined
+          ? "no route to a gateway"
+          : `${node.gateway_distance}`,
+    ],
+    ["Links", links.length ? `${links.length}` : "none"],
+    [
+      "Mean link stability",
+      links.length
+        ? pct(links.reduce((s, l) => s + l.stability, 0) / links.length)
+        : "no links to measure",
+    ],
+    ["Queued packets", `${node.queue_depth ?? 0}`],
+    [
+      "Position",
+      node.location
+        ? `${node.location.lat.toFixed(5)}, ${node.location.lon.toFixed(5)}` +
+          (node.location.accuracy_m
+            ? ` (±${Math.round(node.location.accuracy_m)} m)`
+            : "")
+        : "not reported",
+    ],
+    ["Last heard", node.received_at ? whenText(node.received_at) : "unknown"],
+  ];
+  return facts;
+}
+
+function renderNodeDetail(container, node, network) {
+  if (!node) {
+    container.innerHTML =
+      '<p class="muted small">Select a node to see what the command ' +
+      "centre knows about it.</p>";
+    return;
+  }
+  const rows = nodeFacts(node, network)
+    .map(
+      ([label, value]) =>
+        `<div class="node-fact"><span class="k">${label}</span>` +
+        `<span class="v">${value}</span></div>`
+    )
+    .join("");
+  const neighbours = (node.neighbors || []).length
+    ? node.neighbors.join(", ")
+    : "none reported";
+  container.innerHTML =
+    `<h3 class="node-title">${node.node_id}</h3>` +
+    `<div class="node-facts">${rows}</div>` +
+    `<p class="muted small">Neighbours: ${neighbours}</p>`;
 }
 
 function renderIncidents(data) {
@@ -853,6 +1203,97 @@ el("why-button").onclick = () => {
   state.whyOpen = !state.whyOpen;
   el("why-text").hidden = !state.whyOpen;
 };
+
+/* -- the topology: inspecting a node, and seeing it full size -- */
+
+function selectNodeFrom(canvas, event) {
+  const node = nodeAt(canvas, event.clientX, event.clientY);
+  // Clicking empty space clears, so there is a way back out without
+  // hunting for a close button.
+  state.selectedNode = node ? node.node_id : null;
+  rerender();
+}
+
+function hoverOn(canvas, tooltip) {
+  canvas.onmousemove = (event) => {
+    const node = nodeAt(canvas, event.clientX, event.clientY);
+    canvas.style.cursor = node ? "pointer" : "default";
+    if (!node) {
+      tooltip.hidden = true;
+      return;
+    }
+    const network = state.networkView || { links: [] };
+    const links = (network.links || []).filter(
+      (l) => l.a === node.node_id || l.b === node.node_id
+    );
+    tooltip.innerHTML =
+      `<strong>${node.node_id}</strong> · ${node.role.toLowerCase()}` +
+      `<br>${node.source === "DEVICE" ? "real handset" : "simulated"}` +
+      ` · ${node.reachable ? "reachable" : "gone quiet"}` +
+      `<br>battery ${
+        node.battery === null || node.battery === undefined
+          ? "not reported"
+          : Math.round(node.battery * 100) + "%"
+      } · ${links.length} link(s)` +
+      `<br>${
+        node.role === "GATEWAY" || node.gateway_distance === 0
+          ? "is a gateway"
+          : node.gateway_distance
+            ? node.gateway_distance + " hop(s) to a gateway"
+            : "no route to a gateway"
+      }`;
+    const rect = canvas.getBoundingClientRect();
+    tooltip.hidden = false;
+    // Keep it inside the canvas, so a node near the right edge does not
+    // push the tooltip off the panel.
+    const tipWidth = tooltip.offsetWidth || 190;
+    const x = Math.min(
+      rect.width - tipWidth - 8,
+      Math.max(8, event.clientX - rect.left + 14)
+    );
+    tooltip.style.left = `${x}px`;
+    tooltip.style.top = `${event.clientY - rect.top + 14}px`;
+  };
+  canvas.onmouseleave = () => {
+    tooltip.hidden = true;
+  };
+}
+
+for (const [canvasId, tipId] of [
+  ["topology", "topology-tip"],
+  ["topology-large", "topology-large-tip"],
+]) {
+  const canvas = el(canvasId);
+  canvas.onclick = (event) => selectNodeFrom(canvas, event);
+  hoverOn(canvas, el(tipId));
+}
+
+function setTopologyExpanded(open) {
+  state.topologyExpanded = open;
+  el("topology-overlay").hidden = !open;
+  document.body.classList.toggle("no-scroll", open);
+  rerender();
+}
+
+el("topology-expand").onclick = () => setTopologyExpanded(true);
+el("topology-close").onclick = () => setTopologyExpanded(false);
+el("topology-overlay").onclick = (event) => {
+  // Only the backdrop closes it. A click inside is aimed at the diagram.
+  if (event.target === el("topology-overlay")) setTopologyExpanded(false);
+};
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.topologyExpanded) {
+    setTopologyExpanded(false);
+  }
+});
+
+// The canvas is sized from its element, so a resized window needs a redraw
+// or the picture stays at the old width and goes soft again.
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(rerender, 120);
+});
 
 refresh();
 setInterval(refresh, POLL_MS);

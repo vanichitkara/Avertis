@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#0a0d12">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -118,8 +118,24 @@
       <!-- Topology, drawn from reported links. Nodes are coloured by
            partition, because "who can talk to whom" is the thing an operator
            needs to see at a glance. -->
-      <canvas id="topology" width="560" height="320"></canvas>
+      <div class="topology-wrap">
+        <canvas id="topology"></canvas>
+        <div id="topology-tip" class="topology-tip" hidden></div>
+        <button id="topology-expand" class="expand-button"
+                title="Open the topology full size">expand</button>
+      </div>
       <p class="muted small" id="topology-note">No topology reported yet.</p>
+      <p class="muted small legend">
+  <span class="key-item"><span class="key key-solid"></span>heard from recently</span>
+  <span class="key-item"><span class="key key-dashed"></span>gone quiet</span>
+  <span class="key-item"><span class="key key-gateway"></span>gateway</span>
+  <span class="key-item">colour is the partition</span>
+  <span class="key-item">line thickness is link stability</span>
+</p>
+      <div id="node-detail" class="node-detail">
+        <p class="muted small">Select a node to see what the command centre
+          knows about it.</p>
+      </div>
     </section>
 
     <section class="panel">
@@ -186,6 +202,31 @@
   <span id="footer-note" class="muted small"></span>
 </footer>
 
-<script src="app.js?v=12"></script>
+<!-- Full-size topology. In a column the mesh is a handful of dots a few
+     pixels apart; this is where it is actually readable, with the role and
+     link stability drawn in rather than hidden behind a hover. -->
+<div id="topology-overlay" class="overlay" hidden>
+  <div class="overlay-panel">
+    <div class="overlay-head">
+      <h2>Network topology</h2>
+      <button id="topology-close" class="chip">close</button>
+    </div>
+    <div class="topology-wrap">
+      <canvas id="topology-large"></canvas>
+      <div id="topology-large-tip" class="topology-tip" hidden></div>
+    </div>
+    <p class="muted small" id="topology-large-note"></p>
+    <p class="muted small legend">
+  <span class="key-item"><span class="key key-solid"></span>heard from recently</span>
+  <span class="key-item"><span class="key key-dashed"></span>gone quiet</span>
+  <span class="key-item"><span class="key key-gateway"></span>gateway</span>
+  <span class="key-item">colour is the partition</span>
+  <span class="key-item">line thickness is link stability</span>
+</p>
+
+  </div>
+</div>
+
+<script src="app.js?v=15"></script>
 </body>
 </html>
