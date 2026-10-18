@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/mesh_controller.dart';
 
+import '../../core/role_preference.dart';
 import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../mesh/protocol/packet.dart';
@@ -38,6 +39,8 @@ class MeshScreen extends ConsumerWidget {
               stalledAt: controller.radioStalledAt,
               diagnostics: controller.radioDiagnostics,
             ),
+            const SizedBox(height: 12),
+            _RoleCard(controller: controller),
             const SizedBox(height: 12),
             if (controller.hasBackend) ...[
               _SyncCard(controller: controller),
@@ -197,6 +200,88 @@ class _NeighborTile extends StatelessWidget {
 /// Switching restarts the node: it leaves one mesh and joins another, so any
 /// neighbours are lost and rediscovered. Reports already in custody survive —
 /// they are on disk — but this is not a cosmetic toggle, and it says so.
+/// What this phone says it is.
+///
+/// The command centre has no responder registry — it derives responders
+/// from the mesh, so a phone that never declares itself one leaves every
+/// incident reading "no responders available". Nothing could declare it
+/// until this existed.
+class _RoleCard extends StatelessWidget {
+  const _RoleCard({required this.controller});
+
+  final MeshController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final configured = controller.configuredRole;
+    final actual = controller.status.role;
+    final promoted = actual == NodeRole.gateway && actual != configured;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('THIS PHONE IS',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 1.2)),
+            const SizedBox(height: 12),
+            SegmentedButton<NodeRole>(
+              segments: [
+                for (final role in selectableRoles)
+                  ButtonSegment(
+                    value: role,
+                    label: Text(roleLabel(role)),
+                    icon: Icon(
+                      role == NodeRole.responder
+                          ? Icons.medical_services_outlined
+                          : Icons.person_outline,
+                      size: 16,
+                    ),
+                  ),
+              ],
+              selected: {configured},
+              onSelectionChanged: (selection) =>
+                  controller.setRole(selection.first),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              roleDescription(configured),
+              style: const TextStyle(
+                  fontSize: 11, color: AvertisColors.textSecondary),
+            ),
+            // Say so when the network has overruled the choice, rather
+            // than showing a selected segment that is not what the rest
+            // of the screen reports.
+            if (promoted) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Acting as a gateway right now, because this phone can '
+                'reach the command centre. It goes back to '
+                '${roleLabel(configured).toLowerCase()} if that drops.',
+                style: const TextStyle(
+                    fontSize: 11, color: AvertisColors.textSecondary),
+              ),
+            ],
+            if (configured == NodeRole.responder) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'A responder is never promoted to gateway — the command '
+                'centre would lose the only unit it can dispatch.',
+                style: TextStyle(
+                    fontSize: 11, color: AvertisColors.textSecondary),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TransportSwitch extends ConsumerWidget {
   const _TransportSwitch({
     required this.mode,

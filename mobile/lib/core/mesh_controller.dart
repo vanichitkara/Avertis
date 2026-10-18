@@ -20,6 +20,7 @@ import '../services/location_service.dart';
 import '../services/gateway_client.dart';
 import '../services/incident_lookup.dart';
 import '../services/media_uploader.dart';
+import 'role_preference.dart';
 import '../services/mesh_service_channel.dart';
 import '../services/permissions_service.dart';
 import 'package:drift/drift.dart' show Value;
@@ -135,6 +136,9 @@ class MeshController extends ChangeNotifier {
   final LocationService locationService = LocationService();
   final MeshServiceChannel meshService = MeshServiceChannel();
   final PermissionsService permissions = PermissionsService();
+
+  /// Where this phone's declared role is kept between launches.
+  final RolePreference rolePreference = const RolePreference();
   StreamSubscription<LocationState>? _locationSub;
   MeshEngine? _engine;
   MockRadioSpace? _mockSpace;
@@ -144,6 +148,11 @@ class MeshController extends ChangeNotifier {
 
   /// The role this node was started with, restored when an uplink is lost.
   NodeRole _configuredRole = NodeRole.survivor;
+
+  /// What the operator declared, as distinct from what the node is acting
+  /// as. A gateway promotion is temporary and the picker must not jump to
+  /// it, or turning Wi-Fi on would silently change the answer.
+  NodeRole get configuredRole => _configuredRole;
 
   MeshEngine? get engine => _engine;
   bool get isRunning => _engine != null;
@@ -175,7 +184,15 @@ class MeshController extends ChangeNotifier {
     final engine = _engine;
     if (engine == null) return;
 
-    final shouldBeGateway = reachable && hasBackend;
+    // A responder is not promoted. Gateway is earned by having a
+    // connection, and a rescue unit is exactly the phone most likely to
+    // have one — so promoting it would quietly reclassify the only
+    // responder on the board, and the command centre would be back to
+    // "no responders available" the moment one found signal.
+    final shouldBeGateway = shouldActAsGateway(
+      canReachBackend: reachable && hasBackend,
+      configured: _configuredRole,
+    );
     final isGateway = engine.state.role == NodeRole.gateway;
     if (shouldBeGateway == isGateway) return;
 
@@ -465,6 +482,36 @@ class MeshController extends ChangeNotifier {
     grantedPermissions = now;
     _radioStartedUnpermitted = false;
     await _restartTransport();
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Declare what this phone is.
+  ///
+  /// The role reaches the backend two ways and both matter: it is in this
+  /// node's own snapshot on the next gateway sync, which is what makes a
+  /// responder dispatchable, and it is in the BLE advertisement, which is
+  /// what neighbouring phones score for relaying. The advertisement is
+  /// fixed when the peripheral starts, so changing it means restarting
+  /// the radio — the engine survives that, and so does anything in
+  /// custody.
+  Future<void> setRole(NodeRole role) async {
+    if (_disposed || role == _configuredRole) return;
+    _configuredRole = role;
+    await rolePreference.remember(role);
+
+    final engine = _engine;
+    if (engine != null && engine.state.role != NodeRole.gateway) {
+      engine.state.role = role;
+    }
+    if (!_disposed) notifyListeners();
+
+    // A responder that already had the gateway role hands it back, and a
+    // survivor that can reach the backend takes it up.
+    _applyGatewayRole(_internetOnline);
+
+    if (mode == TransportMode.ble && engine != null) {
+      await _restartTransport();
+    }
     if (!_disposed) notifyListeners();
   }
 

@@ -91,7 +91,11 @@ class _AvertisAppState extends ConsumerState<AvertisApp>
     if (!mounted) return;
 
     try {
-      await ref.read(meshControllerProvider).start(nodeId: nodeId);
+      final controller = ref.read(meshControllerProvider);
+      await controller.start(
+        nodeId: nodeId,
+        role: await controller.rolePreference.resolve(),
+      );
     } catch (error) {
       debugPrint('avertis: the mesh engine failed to start ($error)');
     }
