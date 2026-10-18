@@ -57,9 +57,18 @@ class MainActivity : FlutterActivity(), AvertisBlePeripheral.Listener {
                     if (deviceId == null || bytes == null) {
                         result.error("BAD_ARGS", "deviceId and bytes required", null)
                     } else {
-                        result.success(
-                            peripheral?.send(deviceId, bytes) ?: false
-                        )
+                        val target = peripheral
+                        if (target == null) {
+                            result.success(false)
+                        } else {
+                            // Answered once every fragment has been
+                            // confirmed by the stack, not when the first
+                            // was handed over. Dart treats a true here as
+                            // "the peer has it".
+                            target.send(deviceId, bytes) { sent ->
+                                result.success(sent)
+                            }
+                        }
                     }
                 }
 

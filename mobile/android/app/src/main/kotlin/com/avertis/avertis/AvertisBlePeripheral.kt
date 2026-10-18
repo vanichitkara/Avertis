@@ -72,6 +72,9 @@ class AvertisBlePeripheral(
 
         /** Conservative payload per notification. docs/protocol.md §7. */
         private const val SAFE_FRAGMENT_BYTES = 180
+
+        /** How long to wait for onNotificationSent before giving up. */
+        private const val NOTIFY_TIMEOUT_MS = 5_000L
         private const val REASSEMBLY_TIMEOUT_MS = 10_000L
     }
 
@@ -86,6 +89,41 @@ class AvertisBlePeripheral(
     private val subscribed = mutableSetOf<String>()
     private val buffers = mutableMapOf<String, Reassembly>()
     private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * Frames waiting to be notified, and the one currently in flight.
+     *
+     * Android allows a single outstanding notification per connection:
+     * the next notifyCharacteristicChanged must wait for
+     * onNotificationSent. This sent every fragment of a packet in a tight
+     * loop instead, so for a three-fragment packet the first went out and
+     * the other two were refused — the peer received an opening fragment
+     * and nothing to complete it, for every packet sent this way.
+     *
+     * Reports are three fragments. Beacons are three. Acknowledgements
+     * are two. So nothing larger than a single fragment ever crossed this
+     * direction of the link, which is the whole of it in the case where
+     * the peer connected to us.
+     */
+    private class Outgoing(
+        val deviceId: String,
+        val frames: ArrayDeque<ByteArray>,
+        val onDone: (Boolean) -> Unit,
+    )
+
+    private val outbox = ArrayDeque<Outgoing>()
+    private var inFlight: Outgoing? = null
+    private var inFlightTimeout: Runnable? = null
+
+    /**
+     * Identifies the frame currently in flight.
+     *
+     * A confirmation that arrives after its own timeout has already
+     * fired would otherwise complete whichever frame started next,
+     * marking a packet sent that was never sent and skipping a fragment.
+     */
+    private var inFlightToken = 0L
+    private var nextToken = 1L
 
     var nodeId: String = ""
         private set
@@ -275,26 +313,92 @@ class AvertisBlePeripheral(
      * Returns false if the peer is not connected or has not subscribed.
      */
     @SuppressLint("MissingPermission")
-    fun send(deviceId: String, bytes: ByteArray): Boolean {
-        val server = gattServer ?: return false
-        val device = connected[deviceId] ?: return false
-        val characteristic = notifyCharacteristic ?: return false
-        if (deviceId !in subscribed) return false
-
-        for (frame in fragment(bytes)) {
-            val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                server.notifyCharacteristicChanged(
-                    device, characteristic, false, frame
-                ) == BluetoothGatt.GATT_SUCCESS
-            } else {
-                @Suppress("DEPRECATION")
-                characteristic.value = frame
-                @Suppress("DEPRECATION")
-                server.notifyCharacteristicChanged(device, characteristic, false)
-            }
-            if (!ok) return false
+    fun send(deviceId: String, bytes: ByteArray, onDone: (Boolean) -> Unit) {
+        if (gattServer == null || notifyCharacteristic == null) {
+            onDone(false)
+            return
         }
-        return true
+        if (connected[deviceId] == null || deviceId !in subscribed) {
+            onDone(false)
+            return
+        }
+
+        handler.post {
+            outbox.addLast(
+                Outgoing(deviceId, ArrayDeque(fragment(bytes)), onDone)
+            )
+            pumpOutbox()
+        }
+    }
+
+    /** Send one frame and wait for the stack to say it went. */
+    @SuppressLint("MissingPermission")
+    private fun pumpOutbox() {
+        if (inFlight != null) return
+        val next = outbox.removeFirstOrNull() ?: return
+
+        val server = gattServer
+        val characteristic = notifyCharacteristic
+        val device = connected[next.deviceId]
+        if (server == null || characteristic == null || device == null ||
+            next.deviceId !in subscribed
+        ) {
+            next.onDone(false)
+            handler.post { pumpOutbox() }
+            return
+        }
+
+        inFlight = next
+        val token = nextToken++
+        inFlightToken = token
+        val frame = next.frames.removeFirst()
+        val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            server.notifyCharacteristicChanged(
+                device, characteristic, false, frame
+            ) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.value = frame
+            @Suppress("DEPRECATION")
+            server.notifyCharacteristicChanged(device, characteristic, false)
+        }
+
+        if (!ok) {
+            finishInFlight(token, false)
+            return
+        }
+
+        // A callback that never arrives must not wedge the queue for good.
+        val timeout = Runnable {
+            Log.w(TAG, "notification to ${next.deviceId} was never confirmed")
+            finishInFlight(token, false)
+        }
+        inFlightTimeout = timeout
+        handler.postDelayed(timeout, NOTIFY_TIMEOUT_MS)
+    }
+
+    /** The frame in flight has landed, failed, or timed out. */
+    private fun finishInFlight(token: Long, sent: Boolean) {
+        // Stale confirmation for a frame already given up on.
+        if (token != inFlightToken) return
+        inFlightTimeout?.let { handler.removeCallbacks(it) }
+        inFlightTimeout = null
+        inFlightToken = 0
+
+        val current = inFlight ?: return
+        if (!sent) {
+            // One lost fragment makes the whole packet unassemblable, so
+            // the rest of it is not worth the radio time.
+            inFlight = null
+            current.onDone(false)
+        } else if (current.frames.isEmpty()) {
+            inFlight = null
+            current.onDone(true)
+        } else {
+            inFlight = null
+            outbox.addFirst(current)
+        }
+        pumpOutbox()
     }
 
     fun connectedPeers(): List<String> = connected.keys.sorted()
@@ -412,6 +516,13 @@ class AvertisBlePeripheral(
         }
 
         @SuppressLint("MissingPermission")
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            val token = inFlightToken
+            handler.post {
+                finishInFlight(token, status == BluetoothGatt.GATT_SUCCESS)
+            }
+        }
+
         override fun onDescriptorWriteRequest(
             device: BluetoothDevice,
             requestId: Int,
