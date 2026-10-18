@@ -187,6 +187,10 @@ class BleDiagnostics {
   int framesReceived = 0;
   int packetsDecoded = 0;
 
+  /// True while this node is deliberately not dialling, because the
+  /// peer has the lower id and should be dialling us.
+  bool waitingForPeerToDial = false;
+
   String? scanError;
   String? connectError;
   String? sendError;
@@ -204,6 +208,10 @@ class BleDiagnostics {
     if (peersIdentified.isEmpty) {
       return 'heard $advertisementsSeen Avertis advertisement(s) but could '
           'not read a node id from any — the scan response is not arriving';
+    }
+    if (waitingForPeerToDial) {
+      return 'found a peer, waiting for it to connect to us — only one '
+          'side of a pair dials, and this is the other one';
     }
     if (connected == 0 && sentAsPeripheral == 0 && framesReceived == 0) {
       return 'found ${peersIdentified.length} peer(s) but no connection '
@@ -224,6 +232,14 @@ class BleDiagnostics {
     return null;
   }
 }
+
+/// Which of two nodes places the call.
+///
+/// Exactly one of any pair must say true, and both must agree without
+/// exchanging anything first — they each know only the two node ids.
+/// Comparing them is enough, and it is stable: the same pair decides the
+/// same way every time, so a reconnection does not swap the roles.
+bool dialsFirst(String me, String peer) => me.compareTo(peer) < 0;
 
 /// Resolves a platform BLE connection identifier to the stable Avertis node
 /// identifier carried in a HELLO.
@@ -428,7 +444,15 @@ class BleMeshTransport extends MeshTransport {
           rssi: result.rssi,
         ),
       );
-      unawaited(_ensureConnected(peerId, result.device));
+      _sightings[peerId] = (_sightings[peerId] ?? 0) + 1;
+      if (_shouldDial(peerId)) {
+        diagnostics.waitingForPeerToDial = false;
+        unawaited(_ensureConnected(peerId, result.device));
+      } else {
+        diagnostics.waitingForPeerToDial =
+            !_writeChars.containsKey(peerId) &&
+                !_inboundPeers.contains(_peerIds.linkIdFor(peerId));
+      }
     }
   }
 
@@ -450,6 +474,41 @@ class BleMeshTransport extends MeshTransport {
       if (data.length >= 8) return data[7] / 255.0;
     }
     return 1.0;
+  }
+
+  /// How many scan windows a peer has been seen in, used to decide when
+  /// to stop waiting for it to call us.
+  final Map<String, int> _sightings = {};
+
+  /// Whether to be the one that dials.
+  ///
+  /// Both phones scan and both find each other, so both used to connect.
+  /// Android then has a GATT client and a GATT server at each end of one
+  /// ACL link, and the pair does not survive it: the second connection
+  /// lands on the existing link, one side's subscription never
+  /// registers, and the result is a link that carries traffic one way.
+  /// The phone that cannot write falls back to notifying, and its own
+  /// notifications are refused because the peer never subscribed — "the
+  /// GATT server refused a notification … is the peer subscribed?".
+  ///
+  /// So only one side dials, chosen by node id. It is an arbitrary rule,
+  /// but both phones compute the same answer from values they already
+  /// have, with no negotiation and nothing to agree on first.
+  ///
+  /// The lower id dials. The higher waits — but not for ever: a peer
+  /// that is advertising and has not called after several scan windows
+  /// is either unable to connect or cannot see us, and a one-sided link
+  /// beats none.
+  static const int waitScansBeforeDialling = 3;
+
+  bool _shouldDial(String peerId) {
+    if (_writeChars.containsKey(peerId)) return false;
+    if (dialsFirst(nodeId, peerId)) return true;
+
+    // We are the higher id, so this peer should be dialling us.
+    final theirLink = _peerIds.linkIdFor(peerId);
+    if (_inboundPeers.contains(theirLink)) return false;
+    return (_sightings[peerId] ?? 0) > waitScansBeforeDialling;
   }
 
   /// Set up a peer we found by scanning, once.
@@ -681,6 +740,7 @@ class BleMeshTransport extends MeshTransport {
     }
     _connSubs.clear();
     _connecting.clear();
+    _sightings.clear();
     for (final device in _devices.values) {
       try {
         await device.disconnect();
