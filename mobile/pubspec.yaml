@@ -31,6 +31,8 @@ dependencies:
   image_picker: ^1.1.2
   record: ^6.1.2
   flutter_secure_storage: ^9.2.2
+  # Remembers which radio this phone is on, across restarts.
+  shared_preferences: ^2.3.3
   # Relay election scores battery, so it has to be the real one.
   battery_plus: ^6.2.1
   uuid: ^4.5.1

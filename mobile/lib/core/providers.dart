@@ -8,6 +8,7 @@ import '../data/report_store.dart';
 import '../mesh/mesh_events.dart';
 import 'mesh_controller.dart';
 import 'node_identity.dart';
+import 'radio_preference.dart';
 
 final databaseProvider = Provider<ReportDatabase>((ref) {
   final db = ReportDatabase.open();
@@ -23,12 +24,29 @@ final nodeIdProvider = FutureProvider<String>(
   (ref) => ref.watch(nodeIdentityProvider).nodeId(),
 );
 
+final radioPreferenceProvider = Provider<RadioPreference>(
+  (ref) => RadioPreference(),
+);
+
+/// How the starting radio was chosen. Overridden in `main`, which resolves
+/// it before the first frame; this default only applies to tests and to any
+/// entry point that forgets to.
+final radioChoiceProvider = Provider<RadioChoice>(
+  (ref) => const RadioChoice(TransportMode.mock, RadioChoiceOrigin.undetermined),
+);
+
 /// Which radio this node is on.
 ///
-/// Defaults to the mock so the app is fully exercisable on an emulator, which
-/// has no Bluetooth. Switching is a real operational act — it tears the node
-/// out of one mesh and puts it in another — so it is deliberate, done from the
-/// mesh screen, and the home screen always names the radio in use.
+/// Seeded in `main` from what this phone was last set to, or from whether
+/// it has a Bluetooth adapter at all. It used to default to the mock
+/// unconditionally, which meant a handset began every launch on a radio
+/// that cannot reach another phone — and because the choice was never
+/// saved, two phones being tested together quietly fell back to it on
+/// every restart.
+///
+/// Switching remains a real operational act — it tears the node out of one
+/// mesh and puts it in another — so it stays deliberate, done from the mesh
+/// screen, and the home screen always names the radio in use.
 final transportModeProvider = StateProvider<TransportMode>(
   (ref) => TransportMode.mock,
 );

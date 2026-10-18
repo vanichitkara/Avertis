@@ -229,6 +229,10 @@ class _TransportSwitch extends ConsumerWidget {
                 if (next == mode) return;
                 final confirmed = await _confirm(context, next);
                 if (!confirmed) return;
+                // Remember it before switching. A deliberate choice that
+                // is forgotten on restart is how both test phones ended up
+                // back on a radio that cannot reach anything.
+                await ref.read(radioPreferenceProvider).remember(next);
                 ref.read(transportModeProvider.notifier).state = next;
               },
             ),
@@ -239,6 +243,12 @@ class _TransportSwitch extends ConsumerWidget {
                       'can find it, and scans for theirs.'
                   : 'Simulated radio, in this app only. Other phones cannot '
                       'see this node — each app has its own simulated space.',
+              style: const TextStyle(
+                  fontSize: 11, color: AvertisColors.textSecondary),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ref.watch(radioChoiceProvider).explanation,
               style: const TextStyle(
                   fontSize: 11, color: AvertisColors.textSecondary),
             ),

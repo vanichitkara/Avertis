@@ -137,8 +137,18 @@ If that fails, it is networking, not Bluetooth. Fix it before continuing.
 
 ## 5. Then: the BLE bring-up
 
-On **both** phones: mesh screen (hub icon) → **RADIO** → **Bluetooth** →
-confirm. Each node restarts on the real radio.
+A phone with a Bluetooth adapter now **starts on Bluetooth by itself**, and
+whatever you pick is remembered across restarts. The mesh screen says which
+of those happened under the RADIO switch ("Defaulted to Bluetooth because
+this device has a radio", or "Restored from your last choice on this
+phone").
+
+So there is usually nothing to do here. Check it anyway on both phones —
+mesh screen (hub icon) → **RADIO** — because a handset left on **Simulated**
+is the single most common reason two phones never find each other, and it
+used to be the default on every launch. The simulated radio is an in-memory
+space inside one app process with one node in it: a phone on it cannot
+discover a peer, ever.
 
 Work in this order. Each step depends on the one before, so do not skip.
 
