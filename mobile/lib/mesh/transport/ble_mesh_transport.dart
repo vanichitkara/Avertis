@@ -93,6 +93,25 @@ class BleFraming {
     return frames;
   }
 
+  /// Decode bytes that are already a whole packet.
+  ///
+  /// The peripheral half's framing lives in Kotlin, and it is symmetric:
+  /// the GATT server fragments what it notifies *and* reassembles what is
+  /// written to it, handing Dart a finished payload. Feeding that payload
+  /// back through [accept] reads its first four bytes as a fragment
+  /// header — for JSON that is `{"` plus two more characters, so the
+  /// length never matches and the packet is silently discarded.
+  ///
+  /// That is one phone reporting seven frames received and zero packets
+  /// decoded on a link its neighbour was writing to perfectly well.
+  static Packet? decode(Uint8List payload) {
+    try {
+      return Packet.decode(payload);
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Feed a frame; returns the packet once every fragment has arrived.
   static Packet? accept(Reassembly buffer, Uint8List frame) {
     if (frame.length < 4) return null;
@@ -416,7 +435,7 @@ class BleMeshTransport extends MeshTransport {
     // Peripheral half first: start being findable before looking for others,
     // so two phones starting together can see each other on the first scan.
     _peripheralSubs.addAll([
-      peripheral.payloads.listen((m) => _onFrame(m.deviceId, m.bytes)),
+      peripheral.payloads.listen((m) => _onPayload(m.deviceId, m.bytes)),
       peripheral.peerConnected.listen((id) {
         _inboundPeers.add(id);
         _peerFound.add(PeerInfo(nodeId: id));
@@ -441,6 +460,7 @@ class BleMeshTransport extends MeshTransport {
     if (!_running) return;
     try {
       diagnostics.scanWindows++;
+      _redialKnownPeers();
       await FlutterBluePlus.startScan(
         withServices: [avertisServiceUuid],
         timeout: scanWindow,
@@ -451,6 +471,24 @@ class BleMeshTransport extends MeshTransport {
       // is recorded: a scan that never starts looks exactly like a scan
       // that finds nothing.
       diagnostics.scanError = error.toString();
+    }
+  }
+
+  /// Retry peers we have already seen, without waiting to see them again.
+  ///
+  /// Dialling used to be driven only by scan results, and Android is free
+  /// to suppress a duplicate result — especially for a device already
+  /// holding an ACL link with us. So a peer whose link was torn down
+  /// mid-session was never offered again, and the only recovery was
+  /// restarting the app. A central write that fails drops the write
+  /// characteristic, which is exactly that situation: still physically
+  /// connected, so no disconnect event, and no new advertisement either.
+  void _redialKnownPeers() {
+    for (final entry in _devices.entries) {
+      if (_connecting.contains(entry.key)) continue;
+      if (!_shouldDial(entry.key)) continue;
+      diagnostics.waitingForPeerToDial = false;
+      unawaited(_ensureConnected(entry.key, entry.value));
     }
   }
 
@@ -713,11 +751,29 @@ class BleMeshTransport extends MeshTransport {
     diagnostics.framesReceived++;
     final buffer = _buffers.putIfAbsent(peerId, Reassembly.new);
     final packet = BleFraming.accept(buffer, frame);
-    if (packet != null) diagnostics.packetsDecoded++;
-    if (packet != null && !_incoming.isClosed) {
-      _peerIds.learn(peerId, packet);
-      _incoming.add((from: _peerIds.nodeIdFor(peerId), packet: packet));
-    }
+    if (packet == null) return;
+    diagnostics.packetsDecoded++;
+    _deliver(peerId, packet);
+  }
+
+  /// A whole packet handed up by the Kotlin GATT server.
+  ///
+  /// Exactly one side of each path does the framing. On the central path
+  /// that is Dart, so bytes arriving there go through reassembly. On the
+  /// peripheral path it is Kotlin, in both directions, so these bytes are
+  /// a finished packet and must not be reassembled a second time.
+  void _onPayload(String peerId, Uint8List payload) {
+    diagnostics.framesReceived++;
+    final packet = BleFraming.decode(payload);
+    if (packet == null) return;
+    diagnostics.packetsDecoded++;
+    _deliver(peerId, packet);
+  }
+
+  void _deliver(String peerId, Packet packet) {
+    if (_incoming.isClosed) return;
+    _peerIds.learn(peerId, packet);
+    _incoming.add((from: _peerIds.nodeIdFor(peerId), packet: packet));
   }
 
   void _dropPeer(String peerId) {
@@ -782,6 +838,12 @@ class BleMeshTransport extends MeshTransport {
         diagnostics.sendFailures++;
         diagnostics.sendError = error.toString();
         _dropPeer(toNode);
+        // The link is gone as far as writing goes, but the device is
+        // very likely still connected, so nothing will re-offer it.
+        // Rebuild it now rather than waiting for an advertisement that
+        // Android may never deliver again.
+        final device = _devices[toNode];
+        if (device != null) unawaited(_ensureConnected(toNode, device));
         // Fall through: the peer may still be reachable inbound.
       }
     }
