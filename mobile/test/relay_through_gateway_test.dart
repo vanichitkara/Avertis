@@ -45,6 +45,12 @@ class Handsets {
     return engine;
   }
 
+  Future<void> stop() async {
+    for (final engine in engines.values) {
+      await engine.stop();
+    }
+  }
+
   Future<void> advance(Duration duration) async {
     for (var i = 0; i < duration.inSeconds; i++) {
       now = now.add(const Duration(seconds: 1));
@@ -129,6 +135,79 @@ void main() {
       expect(connected.state.pendingReports, hasLength(1),
           reason: 'a phone with no internet must not claim a report it '
               'cannot deliver');
+    });
+  });
+
+  group('a report that arrives before the uplink does', () {
+    late Handsets mesh;
+    late MeshEngine offline;
+    late MeshEngine connected;
+
+    setUp(() async {
+      mesh = Handsets();
+      offline = await mesh.add('phone-1', x: 0);
+      connected = await mesh.add('phone-2', x: 20);
+      await mesh.advance(const Duration(seconds: 10));
+
+      // The order two phones actually do this in: the SOS is sent while
+      // the second phone is still a survivor, and it finds signal a
+      // moment later.
+      await offline.sendSos(note: 'trapped, water rising');
+      await mesh.advance(const Duration(seconds: 5));
+    });
+
+    tearDown(() => mesh.stop());
+
+    test('it waits rather than being thrown away', () {
+      expect(connected.state.queue.length, 1,
+          reason: 'nowhere to forward it — phone-1 is the only neighbour '
+              'and it is the origin');
+      expect(connected.state.pendingReports, isEmpty,
+          reason: 'a survivor does not take delivery of it');
+    });
+
+    test('promotion picks it up — the bug', () async {
+      connected.state.role = NodeRole.gateway;
+      connected.reconsiderLocalDelivery();
+
+      expect(connected.state.pendingReports, hasLength(1),
+          reason: 'the phone that can finally deliver it was sitting on it');
+      expect(connected.state.pendingReports.first.payload['note'],
+          'trapped, water rising');
+      // The queue is not empty — delivery puts an ACK on it — but the
+      // report itself must no longer be waiting to be forwarded.
+      expect(
+        connected.state.queue.entries
+            .where((e) => e.packet.messageType == MessageType.sos),
+        isEmpty,
+        reason: 'delivered, so no longer queued for forwarding',
+      );
+    });
+
+    test('and the sender is told', () async {
+      connected.state.role = NodeRole.gateway;
+      connected.reconsiderLocalDelivery();
+      await mesh.advance(const Duration(seconds: 5));
+
+      expect(offline.custodyDepth, 0,
+          reason: 'the acknowledgement is what stops it reading as stuck');
+    });
+
+    test('without promotion it stays stuck, which is what happened', () async {
+      connected.reconsiderLocalDelivery();
+      await mesh.advance(const Duration(seconds: 10));
+
+      expect(connected.state.pendingReports, isEmpty);
+      expect(offline.custodyDepth, 1);
+    });
+
+    test('a second look changes nothing', () async {
+      connected.state.role = NodeRole.gateway;
+      connected.reconsiderLocalDelivery();
+      connected.reconsiderLocalDelivery();
+
+      expect(connected.state.pendingReports, hasLength(1),
+          reason: 'the report must not be delivered twice');
     });
   });
 

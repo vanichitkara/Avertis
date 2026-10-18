@@ -180,6 +180,11 @@ class MeshController extends ChangeNotifier {
 
     engine.state.role =
         shouldBeGateway ? NodeRole.gateway : _configuredRole;
+
+    // Anything already waiting that this node can now take delivery of.
+    // A report relayed here a moment before the uplink came up would
+    // otherwise sit in the queue for good.
+    if (shouldBeGateway) engine.reconsiderLocalDelivery();
     bus.emit(MeshEvent(
       shouldBeGateway ? MeshEventType.gatewayUp : MeshEventType.gatewayDown,
       engine.nodeId,

@@ -435,6 +435,32 @@ class MeshEngine {
   /// Entries are walked in delivery order in place: a packet that is only
   /// waiting out its retry interval keeps its existing `lastAttempt`, so the
   /// timer actually elapses.
+  /// Look again at what is queued, after this node's role has changed.
+  ///
+  /// A report is addressed to "gateway", not to a node. One that arrived
+  /// while this phone was still a survivor was forwarded rather than
+  /// delivered — correct at the time, and wrong a second later when the
+  /// phone found signal and became the gateway. Nothing looked again, so
+  /// the report sat queued on the one device that could finally deliver
+  /// it; or worse, was forwarded back to the phone that sent it, which
+  /// dropped it as a loop. Either way the sender waited for an
+  /// acknowledgement that was never coming.
+  ///
+  /// Promotion is not retroactive on its own. This makes it so.
+  void reconsiderLocalDelivery() {
+    final claimed = state.queue.entries
+        .where((e) => _isLocalDestination(e.packet))
+        .map((e) => e.packet)
+        .toList();
+    if (claimed.isEmpty) return;
+
+    final ids = claimed.map((p) => p.packetId).toSet();
+    state.queue.removeWhere((e) => ids.contains(e.packet.packetId));
+    for (final packet in claimed) {
+      _deliverLocally(packet);
+    }
+  }
+
   Future<void> _pump() async {
     if (!state.alive) return;
     final now = _clock();
