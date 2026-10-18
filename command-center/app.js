@@ -443,6 +443,10 @@ function severityColour(severity) {
   }[severity] || "#6b7a8f";
 }
 
+function priorityLabel(priority) {
+  return (priority || "unknown").replace(/_/g, " ").toLowerCase();
+}
+
 function renderDecision(world) {
   // Follow the filters: showing a decision for an incident the operator
   // has just filtered out reads as the panel ignoring them.
@@ -472,6 +476,15 @@ function renderDecision(world) {
   sev.className = `pill ${chosenIncident.severity}`;
 
   const people = chosenIncident.people_affected;
+  const reportedPriorities = [...new Set(
+    (chosenIncident.evidence || [])
+      .map((e) => e.priority)
+      .filter(Boolean)
+  )];
+  const reported = reportedPriorities.length
+    ? reportedPriorities.map(priorityLabel).join(", ")
+    : "unknown";
+  const assessed = priorityLabel(chosenIncident.severity);
   el("decision-when").textContent =
     `Reported ${whenText(chosenIncident.created_at)}`;
   el("decision-sources").textContent =
@@ -479,7 +492,11 @@ function renderDecision(world) {
     `${Math.round(chosenIncident.confidence * 100)}% · ` +
     (people === null || people === undefined
       ? "headcount unknown"
-      : `${people} affected`);
+      : `${people} affected`) +
+    ` · reported ${reported}` +
+    (reportedPriorities.length === 1 && reportedPriorities[0] === chosenIncident.severity
+      ? ""
+      : ` · assessed ${assessed}`);
 
   el("decision-desc").textContent = chosenIncident.description || "(no description)";
   renderEvidence(chosenIncident);

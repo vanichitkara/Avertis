@@ -38,12 +38,11 @@ header {
   flex-wrap: wrap;
 }
 
-.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand h1 { font-size: 19px; letter-spacing: 2px; margin: 0; }
 .brand .sub { color: var(--text-dim); font-size: 12px; letter-spacing: 1px; }
 .mark {
-  width: 10px; height: 10px; border-radius: 2px;
-  background: var(--mesh); transform: rotate(45deg);
+  width: 32px; height: 32px; flex: 0 0 auto;
 }
 
 .header-state { display: flex; gap: 8px; flex-wrap: wrap; }

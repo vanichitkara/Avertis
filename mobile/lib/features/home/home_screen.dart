@@ -23,7 +23,19 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AVERTIS'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              'assets/branding/avertis-logo.png',
+              width: 28,
+              height: 28,
+              excludeFromSemantics: true,
+            ),
+            const SizedBox(width: 10),
+            const Text('AVERTIS'),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.radar),

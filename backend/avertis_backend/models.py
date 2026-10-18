@@ -233,6 +233,17 @@ class Evidence(BaseModel):
     report_id: str
     origin_node: str
     created_at: datetime
+    # Keep the sender's selected priority alongside the assessment. Incident
+    # severity can be raised by analysis or later corroboration, but the
+    # command centre must not make an EMERGENCY report look as if its sender
+    # pressed LIFE_CRITICAL.
+    #
+    # Optional, and absent means unknown rather than NORMAL. Evidence stored
+    # before this field existed has no value for it, and defaulting those to
+    # NORMAL told an operator that the sender of an SOS had chosen the
+    # lowest priority — inventing a deliberate choice nobody made, which is
+    # the very thing this field was added to prevent.
+    priority: Priority | None = None
     excerpt: str | None = None
     media: list[MediaDescriptor] = Field(default_factory=list)
     hop_count: int = 0

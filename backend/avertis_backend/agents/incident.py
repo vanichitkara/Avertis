@@ -168,6 +168,7 @@ class IncidentAgent:
             report_id=report.report_id,
             origin_node=report.origin_node,
             created_at=report.created_at,
+            priority=report.priority,
             excerpt=text[:240] if text else None,
             media=report.media,
             hop_count=report.hop_count,

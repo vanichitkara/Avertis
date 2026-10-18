@@ -183,6 +183,34 @@ class TestIncidentsAndWorld:
         # Provenance travels with the data.
         assert response.json()["reasoned_by"]
 
+    def test_reported_priority_survives_a_higher_assessment(self, client):
+        report = {
+            **SYNC_BODY["incidents"][0],
+            "report_id": "rpt-priority",
+            "priority": "EMERGENCY",
+            "kind": "REPORT",
+            "text": "someone is trapped under the collapsed bridge",
+        }
+        response = client.post("/api/v1/incident/analyze", json=report)
+        assert response.status_code == 200
+
+        incident = response.json()["incident"]
+        assert incident["severity"] == "LIFE_CRITICAL"
+        assert incident["evidence"][0]["priority"] == "EMERGENCY"
+
+    def test_evidence_from_before_this_field_reads_as_unknown(self):
+        # Rows written by an earlier version carry no priority. Filling one
+        # in would tell an operator the sender of an SOS chose the lowest
+        # priority, which is a choice nobody made.
+        from avertis_backend.models import Evidence
+
+        stored = {
+            "report_id": "rpt-old",
+            "origin_node": "n7ac20",
+            "created_at": "2026-10-17T09:00:00Z",
+        }
+        assert Evidence(**stored).priority is None
+
     def test_the_world_model_has_both_halves(self, client):
         client.post("/api/v1/gateway/sync", json=SYNC_BODY)
         world = client.get("/api/v1/world").json()

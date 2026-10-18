@@ -21,15 +21,16 @@ import 'mesh_transport.dart';
 
 /// Service and characteristic UUIDs. Placeholders until the BLE bring-up —
 /// the engine never references them, which is the point of the abstraction.
-final Guid avertisServiceUuid =
-    Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000001');
-final Guid avertisTxCharacteristic =
-    Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000002');
+final Guid avertisServiceUuid = Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000001');
+final Guid avertisTxCharacteristic = Guid(
+  'a5e7f1c0-1c2b-4c9a-9f10-000000000002',
+);
 
 /// The characteristic a peer's *peripheral* half notifies us on. We subscribe
 /// to this on every peer we connect to as a central.
-final Guid avertisNotifyCharacteristic =
-    Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000003');
+final Guid avertisNotifyCharacteristic = Guid(
+  'a5e7f1c0-1c2b-4c9a-9f10-000000000003',
+);
 
 /// Conservative payload per write; MTU is negotiated but not relied upon.
 const int safeFragmentBytes = 180;
@@ -90,7 +91,7 @@ class BleFraming {
     try {
       return Packet.decode(assembled);
     } on FormatException {
-      return null;   // a corrupt frame is dropped, never crashes the engine
+      return null; // a corrupt frame is dropped, never crashes the engine
     }
   }
 }
@@ -111,6 +112,45 @@ class Reassembly {
     expected = 0;
     totalBytes = 0;
   }
+}
+
+/// Resolves a platform BLE connection identifier to the stable Avertis node
+/// identifier carried in a HELLO.
+///
+/// A peripheral learns an inbound peer as an Android device address, while
+/// the central half learns that same peer from its advertisement as (for
+/// example) `n7ac20`. Passing those two names through to the mesh engine made
+/// one physical link look like two different neighbours. In particular, the
+/// inbound side could receive a HELLO but could not subsequently route a
+/// packet to the node ID named in that HELLO.
+///
+/// The mapping is deliberately learned only from a direct HELLO whose payload
+/// agrees with its packet origin. Forwarded traffic cannot establish a direct
+/// BLE identity: its origin belongs to the source of the report, not the peer
+/// that relayed it.
+class BlePeerIdentityMap {
+  final Map<String, String> _nodeIdByLinkId = {};
+
+  void learn(String linkId, Packet packet) {
+    if (packet.messageType != MessageType.hello) return;
+    final declared = packet.payload['node_id'];
+    if (declared is String &&
+        declared.isNotEmpty &&
+        declared == packet.originNode) {
+      _nodeIdByLinkId[linkId] = declared;
+    }
+  }
+
+  String nodeIdFor(String linkId) => _nodeIdByLinkId[linkId] ?? linkId;
+
+  String? linkIdFor(String nodeId) {
+    for (final entry in _nodeIdByLinkId.entries) {
+      if (entry.value == nodeId) return entry.key;
+    }
+    return null;
+  }
+
+  String remove(String linkId) => _nodeIdByLinkId.remove(linkId) ?? linkId;
 }
 
 /// A BLE node runs *both* roles at once.
@@ -141,6 +181,7 @@ class BleMeshTransport extends MeshTransport {
   /// the peripheral's notify characteristic rather than dialling back, which
   /// would race with their own connection.
   final Set<String> _inboundPeers = {};
+  final BlePeerIdentityMap _peerIds = BlePeerIdentityMap();
 
   final _incoming =
       StreamController<({String from, Packet packet})>.broadcast();
@@ -168,7 +209,8 @@ class BleMeshTransport extends MeshTransport {
 
   @override
   List<String> get peers =>
-      {..._writeChars.keys, ..._inboundPeers}.toList()..sort();
+      {..._writeChars.keys, ..._inboundPeers.map(_peerIds.nodeIdFor)}.toList()
+        ..sort();
 
   /// True when this node is discoverable by other phones.
   bool get isAdvertising => peripheral.state.advertising;
@@ -195,14 +237,11 @@ class BleMeshTransport extends MeshTransport {
       }),
       peripheral.peerDisconnected.listen((id) {
         _inboundPeers.remove(id);
-        if (!_writeChars.containsKey(id)) _dropPeer(id);
+        final nodeId = _peerIds.remove(id);
+        if (!_writeChars.containsKey(nodeId)) _dropPeer(nodeId);
       }),
     ]);
-    await peripheral.start(
-      nodeId: nodeId,
-      role: role.wire,
-      battery: battery,
-    );
+    await peripheral.start(nodeId: nodeId, role: role.wire, battery: battery);
 
     _scanSub = FlutterBluePlus.scanResults.listen(_onScanResults);
     // Scan in windows rather than continuously — a continuous scan is the
@@ -229,11 +268,13 @@ class BleMeshTransport extends MeshTransport {
       final peerId = _peerIdOf(result);
       if (peerId == null || peerId == nodeId) continue;
       _devices[peerId] = result.device;
-      _peerFound.add(PeerInfo(
-        nodeId: peerId,
-        battery: _batteryOf(result),
-        rssi: result.rssi,
-      ));
+      _peerFound.add(
+        PeerInfo(
+          nodeId: peerId,
+          battery: _batteryOf(result),
+          rssi: result.rssi,
+        ),
+      );
       unawaited(_ensureConnected(peerId, result.device));
     }
   }
@@ -294,7 +335,8 @@ class BleMeshTransport extends MeshTransport {
     final buffer = _buffers.putIfAbsent(peerId, Reassembly.new);
     final packet = BleFraming.accept(buffer, frame);
     if (packet != null && !_incoming.isClosed) {
-      _incoming.add((from: peerId, packet: packet));
+      _peerIds.learn(peerId, packet);
+      _incoming.add((from: _peerIds.nodeIdFor(peerId), packet: packet));
     }
   }
 
@@ -321,9 +363,10 @@ class BleMeshTransport extends MeshTransport {
     }
     // The peer connected to us, so answer it over our own notify
     // characteristic instead of dialling back.
-    if (_inboundPeers.contains(toNode)) {
+    final inboundLinkId = _peerIds.linkIdFor(toNode);
+    if (inboundLinkId != null && _inboundPeers.contains(inboundLinkId)) {
       return peripheral.send(
-        toNode,
+        inboundLinkId,
         Uint8List.fromList(packet.encode()),
       );
     }
