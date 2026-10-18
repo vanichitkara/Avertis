@@ -19,6 +19,35 @@ import '../protocol/packet.dart';
 import 'ble_peripheral.dart';
 import 'mesh_transport.dart';
 
+/// Run [body] for [key] at most once at a time, and never let a body that
+/// does not return keep the key.
+///
+/// The in-flight guard around a GATT setup stops two of them racing on one
+/// connection. It also stops every subsequent attempt, so a body that hangs
+/// — which a half-torn-down GATT link readily produces, since neither
+/// `discoverServices` nor the CCCD write carries a timeout of its own —
+/// takes the peer out of service for the rest of the session. Bounding the
+/// body is what makes the guard safe to hold.
+Future<void> runOnceGuarded(
+  Set<String> inFlight,
+  String key,
+  Future<void> Function() body,
+  Duration limit, {
+  required void Function() onTimeout,
+  required void Function(Object error) onError,
+}) async {
+  if (!inFlight.add(key)) return;
+  try {
+    await body().timeout(limit);
+  } on TimeoutException {
+    onTimeout();
+  } on Exception catch (error) {
+    onError(error);
+  } finally {
+    inFlight.remove(key);
+  }
+}
+
 /// Service and characteristic UUIDs. Placeholders until the BLE bring-up —
 /// the engine never references them, which is the point of the abstraction.
 final Guid avertisServiceUuid = Guid('a5e7f1c0-1c2b-4c9a-9f10-000000000001');
@@ -333,6 +362,7 @@ class BleMeshTransport extends MeshTransport {
   final Map<String, Reassembly> _buffers = {};
   final Map<String, StreamSubscription<dynamic>> _valueSubs = {};
   final Map<String, StreamSubscription<dynamic>> _connSubs = {};
+  final Map<String, Timer> _dialFallbackTimers = {};
 
   /// Peers whose setup is in flight, so repeated scan results do not
   /// start a second one over the top of the first.
@@ -449,8 +479,10 @@ class BleMeshTransport extends MeshTransport {
         diagnostics.waitingForPeerToDial = false;
         unawaited(_ensureConnected(peerId, result.device));
       } else {
-        diagnostics.waitingForPeerToDial = !_writeChars.containsKey(peerId) &&
+        diagnostics.waitingForPeerToDial =
+            !_writeChars.containsKey(peerId) &&
             !_inboundPeers.contains(_peerIds.linkIdFor(peerId));
+        _scheduleDialFallback(peerId, result.device);
       }
     }
   }
@@ -475,8 +507,8 @@ class BleMeshTransport extends MeshTransport {
     return 1.0;
   }
 
-  /// The scan window a peer was first seen in, used to decide when to
-  /// stop waiting for it to call us.
+  /// The scan window a peer was first seen in, used when a later scan result
+  /// gives us a chance to decide whether to stop waiting for it to call us.
   ///
   /// Counted in windows, not in scan results: `scanResults` emits many
   /// times inside one four-second window, so counting callbacks reached
@@ -499,11 +531,47 @@ class BleMeshTransport extends MeshTransport {
   /// but both phones compute the same answer from values they already
   /// have, with no negotiation and nothing to agree on first.
   ///
-  /// The lower id dials. The higher waits — but not for ever: a peer
-  /// that is advertising and has not called after several scan windows
-  /// is either unable to connect or cannot see us, and a one-sided link
-  /// beats none.
-  static const int waitScansBeforeDialling = 3;
+  /// The lower id dials first. The higher only waits through one more scan
+  /// window (about ten seconds), then tries too. A peer that can advertise
+  /// but cannot see our advertisement will otherwise leave its counterpart
+  /// waiting indefinitely, which is exactly the one-way discovery observed
+  /// on the gateway handset.
+  ///
+  /// One full interval still gives the designated dialler ample time to
+  /// connect, discover services and subscribe before a fallback attempt can
+  /// race it. A longer three-window wait made a healthy-looking phone remain
+  /// stuck at “waiting for it to connect” for roughly 30 seconds.
+  static const int waitScansBeforeDialling = 1;
+
+  /// Run the takeover from a timer as well as from later scan results.
+  ///
+  /// Android is permitted to suppress duplicate scan results. In that case a
+  /// peer can be seen once, be assigned the initial dialling role, and then
+  /// never be delivered to [_onScanResults] again. Relying on a later result
+  /// made the other phone wait permanently even after its one-window grace
+  /// period had elapsed.
+  void _scheduleDialFallback(String peerId, BluetoothDevice device) {
+    if (dialsFirst(nodeId, peerId) || _writeChars.containsKey(peerId)) return;
+    _dialFallbackTimers.putIfAbsent(peerId, () {
+      return Timer(scanInterval, () {
+        _dialFallbackTimers.remove(peerId);
+        if (!_running ||
+            _writeChars.containsKey(peerId) ||
+            _hasInboundPeer(peerId)) {
+          return;
+        }
+        diagnostics.waitingForPeerToDial = false;
+        unawaited(_ensureConnected(peerId, device));
+      });
+    });
+  }
+
+  bool _hasInboundPeer(String peerId) {
+    if (_inboundPeers.contains(_peerIds.linkIdFor(peerId))) return true;
+    // An inbound peer is unnamed until its first HELLO, so it may be this
+    // peer. Do not start a second GATT client while that handshake is alive.
+    return _inboundPeers.any((link) => _peerIds.nodeIdFor(link) == link);
+  }
 
   bool _shouldDial(String peerId) {
     if (_writeChars.containsKey(peerId)) return false;
@@ -518,15 +586,27 @@ class BleMeshTransport extends MeshTransport {
     // as possibly being this one. Inbound peers we *can* name and that
     // are somebody else do not hold us up, which matters once there are
     // more than two phones.
-    if (_inboundPeers.contains(_peerIds.linkIdFor(peerId))) return false;
-    final anyUnnamedInbound =
-        _inboundPeers.any((link) => _peerIds.nodeIdFor(link) == link);
-    if (anyUnnamedInbound) return false;
+    if (_hasInboundPeer(peerId)) return false;
 
     final firstSeen = _firstSeenInWindow[peerId];
     if (firstSeen == null) return false;
     return diagnostics.scanWindows - firstSeen >= waitScansBeforeDialling;
   }
+
+  /// How long the whole of [_ensureConnected] may take.
+  ///
+  /// Its in-flight guard is only safe if it is always released. `connect`
+  /// takes a timeout, but `discoverServices` and the CCCD write do not,
+  /// and a GATT stack that never answers either of them is an ordinary
+  /// outcome on a link that has just been torn down underneath us. That
+  /// left the peer id in `_connecting` permanently: no retry, no error,
+  /// and a handset that had seen its peer and would never dial it again —
+  /// the gateway sitting on "waiting for it to connect to us" while the
+  /// phone that should have dialled had quietly wedged.
+  ///
+  /// The peer is disconnected on the way out so the abandoned operations
+  /// fail rather than landing later on state a retry is already rebuilding.
+  static const Duration linkSetupTimeout = Duration(seconds: 20);
 
   /// Set up a peer we found by scanning, once.
   ///
@@ -551,70 +631,82 @@ class BleMeshTransport extends MeshTransport {
     if (_writeChars.containsKey(peerId) && _valueSubs.containsKey(peerId)) {
       return;
     }
-    if (!_connecting.add(peerId)) return;
+    await runOnceGuarded(
+      _connecting,
+      peerId,
+      () => _setUpLink(peerId, device),
+      linkSetupTimeout,
+      onTimeout: () {
+        diagnostics.connectFailures++;
+        diagnostics.connectError =
+            'gave up setting up $peerId after '
+            '${linkSetupTimeout.inSeconds}s — the GATT stack never '
+            'finished discovery or the subscription';
+        _dropPeer(peerId);
+        unawaited(device.disconnect().catchError((_) {}));
+      },
+      onError: (error) {
+        diagnostics.connectFailures++;
+        diagnostics.connectError = error.toString();
+        _dropPeer(peerId);
+      },
+    );
+  }
 
-    try {
-      diagnostics.connectAttempts++;
-      await device.connect(timeout: const Duration(seconds: 8));
-      final services = await device.discoverServices();
+  Future<void> _setUpLink(String peerId, BluetoothDevice device) async {
+    diagnostics.connectAttempts++;
+    await device.connect(timeout: const Duration(seconds: 8));
+    final services = await device.discoverServices();
 
-      BluetoothCharacteristic? notify;
-      for (final service in services) {
-        if (service.serviceUuid != avertisServiceUuid) continue;
-        for (final characteristic in service.characteristics) {
-          // We write frames to the peer here...
-          if (characteristic.characteristicUuid == avertisTxCharacteristic) {
-            _writeChars[peerId] = characteristic;
-          }
-          // ...and the peer notifies us back here.
-          if (characteristic.characteristicUuid ==
-              avertisNotifyCharacteristic) {
-            notify = characteristic;
-          }
+    BluetoothCharacteristic? notify;
+    for (final service in services) {
+      if (service.serviceUuid != avertisServiceUuid) continue;
+      for (final characteristic in service.characteristics) {
+        // We write frames to the peer here...
+        if (characteristic.characteristicUuid == avertisTxCharacteristic) {
+          _writeChars[peerId] = characteristic;
+        }
+        // ...and the peer notifies us back here.
+        if (characteristic.characteristicUuid == avertisNotifyCharacteristic) {
+          notify = characteristic;
         }
       }
-
-      // Subscribe after discovery has finished rather than in the middle
-      // of walking its results, so the CCCD write is the only operation
-      // in flight.
-      if (notify != null) {
-        await notify.setNotifyValue(true);
-        await _valueSubs.remove(peerId)?.cancel();
-        _valueSubs[peerId] = notify.onValueReceived.listen(
-          (value) => _onFrame(peerId, Uint8List.fromList(value)),
-        );
-      }
-
-      if (_writeChars.containsKey(peerId) && _valueSubs.containsKey(peerId)) {
-        diagnostics.connected++;
-        diagnostics.connectError = null;
-      } else if (_writeChars.containsKey(peerId)) {
-        diagnostics.connectError =
-            'connected to $peerId but could not subscribe to its '
-            'notifications — it will not be able to answer us';
-      } else {
-        // Connected, but the service did not expose what we need. Worth
-        // separating from a failed connection: it means the peer is a
-        // different build, not out of range.
-        diagnostics.connectError =
-            'connected to $peerId but found no Avertis write characteristic';
-      }
-
-      // One listener per peer. Registering this on every setup left a
-      // stack of them, each firing _dropPeer on the same disconnect.
-      await _connSubs.remove(peerId)?.cancel();
-      _connSubs[peerId] = device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected) {
-          _dropPeer(peerId);
-        }
-      });
-    } on Exception catch (error) {
-      diagnostics.connectFailures++;
-      diagnostics.connectError = error.toString();
-      _dropPeer(peerId);
-    } finally {
-      _connecting.remove(peerId);
     }
+
+    // Subscribe after discovery has finished rather than in the middle
+    // of walking its results, so the CCCD write is the only operation
+    // in flight.
+    if (notify != null) {
+      await notify.setNotifyValue(true);
+      await _valueSubs.remove(peerId)?.cancel();
+      _valueSubs[peerId] = notify.onValueReceived.listen(
+        (value) => _onFrame(peerId, Uint8List.fromList(value)),
+      );
+    }
+
+    if (_writeChars.containsKey(peerId) && _valueSubs.containsKey(peerId)) {
+      diagnostics.connected++;
+      diagnostics.connectError = null;
+    } else if (_writeChars.containsKey(peerId)) {
+      diagnostics.connectError =
+          'connected to $peerId but could not subscribe to its '
+          'notifications — it will not be able to answer us';
+    } else {
+      // Connected, but the service did not expose what we need. Worth
+      // separating from a failed connection: it means the peer is a
+      // different build, not out of range.
+      diagnostics.connectError =
+          'connected to $peerId but found no Avertis write characteristic';
+    }
+
+    // One listener per peer. Registering this on every setup left a
+    // stack of them, each firing _dropPeer on the same disconnect.
+    await _connSubs.remove(peerId)?.cancel();
+    _connSubs[peerId] = device.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _dropPeer(peerId);
+      }
+    });
   }
 
   void _onFrame(String peerId, Uint8List frame) {
@@ -629,6 +721,7 @@ class BleMeshTransport extends MeshTransport {
   }
 
   void _dropPeer(String peerId) {
+    _dialFallbackTimers.remove(peerId)?.cancel();
     _writeChars.remove(peerId);
     _buffers.remove(peerId);
     unawaited(_valueSubs.remove(peerId)?.cancel());
@@ -718,7 +811,8 @@ class BleMeshTransport extends MeshTransport {
       return ok;
     }
     diagnostics.sendFailures++;
-    diagnostics.sendError = 'no route to $toNode: not connected as a '
+    diagnostics.sendError =
+        'no route to $toNode: not connected as a '
         'central, and not subscribed to us as a peer';
     return false;
   }
@@ -756,6 +850,10 @@ class BleMeshTransport extends MeshTransport {
       await sub.cancel();
     }
     _connSubs.clear();
+    for (final timer in _dialFallbackTimers.values) {
+      timer.cancel();
+    }
+    _dialFallbackTimers.clear();
     _connecting.clear();
     _firstSeenInWindow.clear();
     for (final device in _devices.values) {

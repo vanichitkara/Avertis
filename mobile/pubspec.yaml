@@ -1,7 +1,7 @@
 name: avertis
 description: "Avertis — adaptive disaster-response intelligence. Mobile node."
 publish_to: 'none'
-version: 0.1.0+14
+version: 0.1.0+15
 
 environment:
   sdk: ^3.9.0
