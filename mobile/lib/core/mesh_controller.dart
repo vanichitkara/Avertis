@@ -242,6 +242,22 @@ class MeshController extends ChangeNotifier {
     return transport is BleMeshTransport ? transport.peripheralWarning : null;
   }
 
+  /// What the radio has done, for a node that is finding nobody.
+  ///
+  /// Null on the simulated radio, and null once a peer is connected.
+  /// Otherwise the first step that has not happened yet — see
+  /// [BleDiagnostics.stalledAt].
+  String? get radioStalledAt {
+    final transport = _engine?.transport;
+    if (transport is! BleMeshTransport) return null;
+    return transport.diagnostics.stalledAt;
+  }
+
+  BleDiagnostics? get radioDiagnostics {
+    final transport = _engine?.transport;
+    return transport is BleMeshTransport ? transport.diagnostics : null;
+  }
+
   late MeshStatus _status = MeshStatus.notStarted(mode);
   MeshStatus get status => _status;
 

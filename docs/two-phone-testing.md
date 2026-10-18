@@ -171,6 +171,22 @@ If one stays at 0:
   advertise at all; the app says so rather than hiding it. Such a phone can
   still scan and relay for others, but will never be discovered — pair it
   with a phone that can advertise.
+- **Read the radio line on the mesh screen of each phone.** It says which
+  step has not happened, and the four possibilities need four different
+  responses:
+
+  | What it says | What it means |
+  |---|---|
+  | `no scan has run yet` | the transport never started — check permissions |
+  | `no Avertis advertisement has been heard` | *this* phone is scanning fine. The other one is not being heard: check its own screen for an advertising failure, and that it is on Bluetooth rather than Simulated |
+  | `could not read a node id` | heard, but the scan response is not arriving — a handset or stack limitation |
+  | `no connection succeeded` | found each other, GATT is failing; the message carries the platform's reason |
+
+  The counts beside it (`N scan(s) · N advert(s) heard · N peer(s)
+  identified · N/N connection(s) made`) are raw figures from the radio.
+  **Both phones reporting "no Avertis advertisement has been heard" means
+  neither is advertising**, which is a different fault from one of them
+  being deaf — and it is the case worth checking first.
 - `adb -s <serial> logcat | grep AvertisBle` gives the reason. Expect
   entries about advertising starting, or failing with a named cause.
 - Confirm Bluetooth **and** Location are on in system settings.

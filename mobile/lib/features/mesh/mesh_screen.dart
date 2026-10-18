@@ -13,6 +13,7 @@ import '../../core/providers.dart';
 import '../../core/theme.dart';
 import '../../mesh/protocol/packet.dart';
 import '../../mesh/node_state.dart';
+import '../../mesh/transport/ble_mesh_transport.dart';
 import 'mesh_activity_feed.dart';
 
 class MeshScreen extends ConsumerWidget {
@@ -34,6 +35,8 @@ class MeshScreen extends ConsumerWidget {
             _TransportSwitch(
               mode: status.transport,
               advertisingWarning: controller.advertisingWarning,
+              stalledAt: controller.radioStalledAt,
+              diagnostics: controller.radioDiagnostics,
             ),
             const SizedBox(height: 12),
             if (controller.hasBackend) ...[
@@ -195,10 +198,17 @@ class _NeighborTile extends StatelessWidget {
 /// neighbours are lost and rediscovered. Reports already in custody survive —
 /// they are on disk — but this is not a cosmetic toggle, and it says so.
 class _TransportSwitch extends ConsumerWidget {
-  const _TransportSwitch({required this.mode, required this.advertisingWarning});
+  const _TransportSwitch({
+    required this.mode,
+    required this.advertisingWarning,
+    required this.stalledAt,
+    required this.diagnostics,
+  });
 
   final TransportMode mode;
   final String? advertisingWarning;
+  final String? stalledAt;
+  final BleDiagnostics? diagnostics;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -275,6 +285,33 @@ class _TransportSwitch extends ConsumerWidget {
                   ),
                 ],
               ),
+            ],
+            // What the radio has actually done. "Searching" on its own is
+            // not a diagnosis, and five different faults produced it.
+            if (isBle && stalledAt != null) ...[
+              const SizedBox(height: 10),
+              Text('Not connected yet: $stalledAt',
+                  style: const TextStyle(
+                      fontSize: 11, color: AvertisColors.operational)),
+            ],
+            if (isBle && diagnostics != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Radio: ${diagnostics!.scanWindows} scan(s) · '
+                '${diagnostics!.advertisementsSeen} Avertis advert(s) heard · '
+                '${diagnostics!.peersIdentified.length} peer(s) identified · '
+                '${diagnostics!.connected}/${diagnostics!.connectAttempts} '
+                'connection(s) made',
+                style: const TextStyle(
+                    fontSize: 11, color: AvertisColors.textSecondary),
+              ),
+              if (diagnostics!.unidentified > 0)
+                Text(
+                  '${diagnostics!.unidentified} advert(s) carried no readable '
+                  'node id',
+                  style: const TextStyle(
+                      fontSize: 11, color: AvertisColors.textSecondary),
+                ),
             ],
           ],
         ),

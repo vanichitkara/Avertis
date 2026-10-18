@@ -114,6 +114,52 @@ class Reassembly {
   }
 }
 
+/// What the radio has actually done, for a node that is finding nobody.
+///
+/// Every field is a count or a message from the platform. Nothing here is
+/// inferred: the point is to separate "we never scanned", "we scanned and
+/// heard nothing", "we heard something that was not us", "we heard us but
+/// could not read it" and "we read it but could not connect".
+class BleDiagnostics {
+  int scanWindows = 0;
+
+  /// Advertisements matching the Avertis service filter.
+  int advertisementsSeen = 0;
+
+  /// Matched the filter but carried no readable node id.
+  int unidentified = 0;
+
+  final Set<String> peersIdentified = {};
+
+  int connectAttempts = 0;
+  int connected = 0;
+  int connectFailures = 0;
+
+  String? scanError;
+  String? connectError;
+
+  /// The first step that has not happened, in the order it has to happen.
+  /// Null once a peer has been connected to.
+  String? get stalledAt {
+    if (scanError != null) return 'the scan will not start: $scanError';
+    if (scanWindows == 0) return 'no scan has run yet';
+    if (advertisementsSeen == 0) {
+      return 'scanning, but no Avertis advertisement has been heard — '
+          'check the other phone is on Bluetooth, in range, and not '
+          'reporting an advertising failure of its own';
+    }
+    if (peersIdentified.isEmpty) {
+      return 'heard $advertisementsSeen Avertis advertisement(s) but could '
+          'not read a node id from any — the scan response is not arriving';
+    }
+    if (connected == 0) {
+      return 'found ${peersIdentified.length} peer(s) but no connection '
+          'succeeded${connectError == null ? '' : ': $connectError'}';
+    }
+    return null;
+  }
+}
+
 /// Resolves a platform BLE connection identifier to the stable Avertis node
 /// identifier carried in a HELLO.
 ///
@@ -198,6 +244,17 @@ class BleMeshTransport extends MeshTransport {
   Timer? _scanTimer;
   bool _running = false;
 
+  /// Counts from the radio, so a node that finds nobody can say at which
+  /// step it stopped.
+  ///
+  /// "Searching" is not a diagnosis. Scanning and not being advertised to,
+  /// hearing advertisements that are not ours, hearing ours but failing to
+  /// read a node id, and reading one but failing to connect are four
+  /// different faults with four different fixes, and they looked identical
+  /// from the outside — which cost real hours on two handsets that were a
+  /// foot apart the whole time.
+  final BleDiagnostics diagnostics = BleDiagnostics();
+
   @override
   Stream<({String from, Packet packet})> get incoming => _incoming.stream;
 
@@ -254,19 +311,32 @@ class BleMeshTransport extends MeshTransport {
   Future<void> _scanOnce() async {
     if (!_running) return;
     try {
+      diagnostics.scanWindows++;
       await FlutterBluePlus.startScan(
         withServices: [avertisServiceUuid],
         timeout: scanWindow,
       );
-    } on Exception {
-      // A failed scan window is not fatal; the next one will retry.
+      diagnostics.scanError = null;
+    } on Exception catch (error) {
+      // A failed scan window is not fatal; the next one will retry. But it
+      // is recorded: a scan that never starts looks exactly like a scan
+      // that finds nothing.
+      diagnostics.scanError = error.toString();
     }
   }
 
   void _onScanResults(List<ScanResult> results) {
     for (final result in results) {
+      diagnostics.advertisementsSeen++;
       final peerId = _peerIdOf(result);
-      if (peerId == null || peerId == nodeId) continue;
+      if (peerId == null) {
+        // Matched our service filter but carried no readable node id —
+        // usually a scan response that did not arrive.
+        diagnostics.unidentified++;
+        continue;
+      }
+      if (peerId == nodeId) continue;
+      diagnostics.peersIdentified.add(peerId);
       _devices[peerId] = result.device;
       _peerFound.add(
         PeerInfo(
@@ -302,6 +372,7 @@ class BleMeshTransport extends MeshTransport {
   Future<void> _ensureConnected(String peerId, BluetoothDevice device) async {
     if (_writeChars.containsKey(peerId)) return;
     try {
+      diagnostics.connectAttempts++;
       await device.connect(timeout: const Duration(seconds: 8));
       final services = await device.discoverServices();
       for (final service in services) {
@@ -321,12 +392,24 @@ class BleMeshTransport extends MeshTransport {
           }
         }
       }
+      if (_writeChars.containsKey(peerId)) {
+        diagnostics.connected++;
+        diagnostics.connectError = null;
+      } else {
+        // Connected, but the service did not expose what we need. Worth
+        // separating from a failed connection: it means the peer is a
+        // different build, not out of range.
+        diagnostics.connectError =
+            'connected to $peerId but found no Avertis write characteristic';
+      }
       device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
           _dropPeer(peerId);
         }
       });
-    } on Exception {
+    } on Exception catch (error) {
+      diagnostics.connectFailures++;
+      diagnostics.connectError = error.toString();
       _dropPeer(peerId);
     }
   }
