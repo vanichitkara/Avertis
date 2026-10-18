@@ -40,13 +40,32 @@ class AvertisApp extends ConsumerStatefulWidget {
   ConsumerState<AvertisApp> createState() => _AvertisAppState();
 }
 
-class _AvertisAppState extends ConsumerState<AvertisApp> {
+class _AvertisAppState extends ConsumerState<AvertisApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Start the mesh as soon as we have a stable node identity. The app is
     // useful the moment it opens — there is no sign-in, no setup, no account.
     WidgetsBinding.instance.addPostFrameCallback((_) => _startCurrentNode());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Coming back from system settings is the moment a refused Bluetooth
+  /// permission is most likely to have been granted. Without this the
+  /// radio stays deaf until the app is killed and reopened, and nothing
+  /// on screen explains why.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle == AppLifecycleState.resumed) {
+      unawaited(ref.read(meshControllerProvider).retryRadioIfNowPermitted());
+    }
   }
 
   /// Start whichever controller is current.

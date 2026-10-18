@@ -43,7 +43,10 @@ class MeshEngine {
   }) : _clock = clock ?? (() => DateTime.now().toUtc());
 
   final NodeState state;
-  final MeshTransport transport;
+
+  /// Not final: a radio can be restarted under a running node. See
+  /// [restartTransport].
+  MeshTransport transport;
   final MeshEventBus bus;
   final DateTime Function() _clock;
 
@@ -88,6 +91,30 @@ class MeshEngine {
     }
     _subs.clear();
     await transport.stop();
+  }
+
+  /// Swap the radio without replacing the node.
+  ///
+  /// Used when a Bluetooth permission is granted after the transport has
+  /// already started: the old one was refused by the OS and will never
+  /// find anybody, but the node itself is fine and may be holding
+  /// somebody's report. Custody, counters and identity all survive —
+  /// this is a radio being restarted, not a node being rebuilt.
+  ///
+  /// Neighbours do not survive, because they genuinely do not: nothing
+  /// has been heard on the new radio yet, and carrying the old list over
+  /// would claim links that may no longer exist.
+  Future<void> restartTransport(MeshTransport replacement) async {
+    _ticker?.cancel();
+    for (final s in _subs) {
+      await s.cancel();
+    }
+    _subs.clear();
+    await transport.stop();
+
+    state.neighbors.clear();
+    transport = replacement;
+    await start();
   }
 
   // -- origination ----------------------------------------------------

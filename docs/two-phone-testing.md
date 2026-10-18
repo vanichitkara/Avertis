@@ -160,6 +160,13 @@ Hold the phones within a metre of each other.
 
 If one stays at 0:
 
+- **Grant the Bluetooth permission when the app asks on first launch.**
+  Android refuses a scan without BLUETOOTH_SCAN and an advertisement
+  without BLUETOOTH_ADVERTISE, and a radio that was refused stays refused.
+  The app now asks before it starts the radio, and retries when you come
+  back from system settings having granted it — but a phone where it was
+  denied and never granted will sit on "searching" with Bluetooth plainly
+  switched on, which looks like a radio fault and is not one.
 - Check the mesh screen for an advertising warning. Some handsets cannot
   advertise at all; the app says so rather than hiding it. Such a phone can
   still scan and relay for others, but will never be discovered — pair it

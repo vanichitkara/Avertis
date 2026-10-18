@@ -11,6 +11,7 @@ import '../../core/mesh_controller.dart';
 
 import '../../core/providers.dart';
 import '../../core/theme.dart';
+import '../../mesh/protocol/packet.dart';
 import '../../mesh/node_state.dart';
 import 'mesh_activity_feed.dart';
 
@@ -56,9 +57,14 @@ class MeshScreen extends ConsumerWidget {
                             : 'Simulated radio'),
                     _kv(
                       'Gateway distance',
-                      status.gatewayDistance == null
-                          ? 'unknown — no route to a gateway'
-                          : '${status.gatewayDistance} hop(s)',
+                      // A gateway is the way out, so it is never "no route"
+                      // to itself. It reports no distance because the
+                      // question does not apply to it.
+                      status.role == NodeRole.gateway
+                          ? 'this node is the gateway'
+                          : status.gatewayDistance == null
+                              ? 'unknown — no route to a gateway'
+                              : '${status.gatewayDistance} hop(s)',
                     ),
                     _kv('Packets queued', '${status.queueDepth}'),
                     _kv('Reports awaiting acknowledgement',

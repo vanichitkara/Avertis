@@ -47,6 +47,7 @@ class MeshStatus {
     required this.custodyDepth,
     required this.gatewayDistance,
     required this.transport,
+    this.starting = false,
   });
 
   final String nodeId;
@@ -63,6 +64,11 @@ class MeshStatus {
   final int? gatewayDistance;
   final TransportMode transport;
 
+  /// True before the node has started — while permissions are being
+  /// asked for, above all. Nothing in here is a measurement yet, and the
+  /// UI says "starting" rather than reporting zeros as findings.
+  final bool starting;
+
   static const empty = MeshStatus(
     nodeId: '—',
     role: NodeRole.survivor,
@@ -75,7 +81,27 @@ class MeshStatus {
     custodyDepth: 0,
     gatewayDistance: null,
     transport: TransportMode.mock,
+    starting: true,
   );
+
+  /// The placeholder for a node that has not started, on the radio it is
+  /// actually configured for. `empty` said `mock`, so a phone waiting on
+  /// a Bluetooth permission reported "simulated radio" on its home
+  /// screen — naming the one radio it was not about to use.
+  static MeshStatus notStarted(TransportMode mode) => MeshStatus(
+        nodeId: '—',
+        role: NodeRole.survivor,
+        internetOnline: false,
+        meshConnected: false,
+        neighborCount: 0,
+        meshHealth: 0,
+        battery: 1,
+        queueDepth: 0,
+        custodyDepth: 0,
+        gatewayDistance: null,
+        transport: mode,
+        starting: true,
+      );
 }
 
 /// Where the backend lives, supplied at build time:
@@ -216,7 +242,7 @@ class MeshController extends ChangeNotifier {
     return transport is BleMeshTransport ? transport.peripheralWarning : null;
   }
 
-  MeshStatus _status = MeshStatus.empty;
+  late MeshStatus _status = MeshStatus.notStarted(mode);
   MeshStatus get status => _status;
 
   /// Async work started before disposal can complete after it — a timer tick,
@@ -279,6 +305,24 @@ class MeshController extends ChangeNotifier {
   /// connectivity to this app, which is the honest reading.
   static const Duration reachabilityInterval = Duration(seconds: 20);
 
+  /// Ask for the runtime permissions, once.
+  ///
+  /// Separate from [_startBackgroundRelay] because the BLE transport needs
+  /// the answer *before* it starts, and the foreground service needs it
+  /// after. Asking twice would put two sets of dialogs in front of someone
+  /// opening the app for the first time.
+  bool _permissionsAsked = false;
+  Future<void> _ensurePermissions() async {
+    if (_permissionsAsked) return;
+    _permissionsAsked = true;
+    grantedPermissions = await permissions.request();
+    if (!_disposed) notifyListeners();
+  }
+
+  /// True when the radio was started with no Bluetooth permission, so a
+  /// later grant has something to retry.
+  bool _radioStartedUnpermitted = false;
+
   Future<void> start({
     required String nodeId,
     NodeRole role = NodeRole.survivor,
@@ -286,6 +330,23 @@ class MeshController extends ChangeNotifier {
   }) async {
     if (_engine != null) return;
     _configuredRole = role;
+
+    // Ask before the radio starts, not after.
+    //
+    // Android refuses a scan without BLUETOOTH_SCAN and an advertisement
+    // without BLUETOOTH_ADVERTISE, and nothing here restarted the
+    // transport when the grant arrived a moment later — so the node sat
+    // on "searching" for the rest of the session, with Bluetooth on and
+    // two phones side by side finding nothing.
+    //
+    // This was latent until the radio began defaulting to Bluetooth. Before
+    // that the app always came up simulated and a BLE transport was only
+    // ever built after someone had granted permissions by hand.
+    if (mode == TransportMode.ble) {
+      await _ensurePermissions();
+      if (_disposed) return;
+      _radioStartedUnpermitted = !grantedPermissions.bluetooth;
+    }
 
     final MeshTransport transport;
     switch (mode) {
@@ -355,7 +416,7 @@ class MeshController extends ChangeNotifier {
   }
 
   Future<void> _startBackgroundRelay() async {
-    grantedPermissions = await permissions.request();
+    await _ensurePermissions();
     if (_disposed) return;
     if (grantedPermissions.canRelayInBackground) {
       backgroundRelayActive = await meshService.start();
@@ -363,6 +424,40 @@ class MeshController extends ChangeNotifier {
       backgroundRelayActive = false;
     }
     if (!_disposed) notifyListeners();
+  }
+
+  /// Bring the radio back up after a permission was granted late.
+  ///
+  /// Someone who refuses the Bluetooth prompt and then grants it in system
+  /// settings has done everything asked of them; without this the app
+  /// would still be deaf until they restarted it, with nothing on screen
+  /// to say so.
+  Future<void> retryRadioIfNowPermitted() async {
+    if (_disposed || mode != TransportMode.ble) return;
+    if (!_radioStartedUnpermitted) return;
+
+    final now = await permissions.check();
+    if (_disposed || !now.bluetooth) return;
+
+    grantedPermissions = now;
+    _radioStartedUnpermitted = false;
+    await _restartTransport();
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Rebuild the transport under the running engine, keeping its state.
+  ///
+  /// Reports already in custody stay in custody: this is a radio being
+  /// restarted, not a node being replaced.
+  Future<void> _restartTransport() async {
+    final engine = _engine;
+    if (engine == null) return;
+    await engine.restartTransport(
+      BleMeshTransport(engine.nodeId, role: _configuredRole),
+    );
+    if (!backgroundRelayActive && grantedPermissions.canRelayInBackground) {
+      backgroundRelayActive = await meshService.start();
+    }
   }
 
   /// Spend a connectivity window, if there is a backend to spend it on.

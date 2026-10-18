@@ -190,9 +190,15 @@ class _ConnectivityCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             Text(
-              'Node ${status.nodeId} · '
-              '${status.transport == TransportMode.ble ? 'BLE' : 'simulated radio'}'
-              '${status.gatewayDistance != null ? ' · gateway ${status.gatewayDistance} hop(s)' : ''}',
+              status.starting
+                  // Permissions are being asked for. Reporting a node id
+                  // and a hop count here would be reporting measurements
+                  // nothing has taken yet.
+                  ? 'Starting on '
+                      '${status.transport == TransportMode.ble ? 'Bluetooth' : 'the simulated radio'}…'
+                  : 'Node ${status.nodeId} · '
+                      '${status.transport == TransportMode.ble ? 'BLE' : 'simulated radio'}'
+                      '${status.gatewayDistance != null ? ' · gateway ${status.gatewayDistance} hop(s)' : ''}',
               style: const TextStyle(
                   fontSize: 11, color: AvertisColors.textSecondary),
             ),
