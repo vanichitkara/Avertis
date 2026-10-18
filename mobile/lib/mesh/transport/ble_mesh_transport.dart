@@ -135,8 +135,20 @@ class BleDiagnostics {
   int connected = 0;
   int connectFailures = 0;
 
+  /// Packets handed to the radio, by direction. A link can be up in one
+  /// direction only, and the two halves use different Android APIs, so
+  /// one number moving while the other does not is the diagnosis.
+  int sentAsCentral = 0;
+  int sentAsPeripheral = 0;
+  int sendFailures = 0;
+
+  /// Frames off the radio, and the packets that survived reassembly.
+  int framesReceived = 0;
+  int packetsDecoded = 0;
+
   String? scanError;
   String? connectError;
+  String? sendError;
 
   /// The first step that has not happened, in the order it has to happen.
   /// Null once a peer has been connected to.
@@ -152,9 +164,21 @@ class BleDiagnostics {
       return 'heard $advertisementsSeen Avertis advertisement(s) but could '
           'not read a node id from any — the scan response is not arriving';
     }
-    if (connected == 0) {
+    if (connected == 0 && sentAsPeripheral == 0 && framesReceived == 0) {
       return 'found ${peersIdentified.length} peer(s) but no connection '
           'succeeded${connectError == null ? '' : ': $connectError'}';
+    }
+    if (sentAsCentral == 0 && sentAsPeripheral == 0) {
+      return 'connected, but nothing has been sent yet'
+          '${sendError == null ? '' : ' — $sendError'}';
+    }
+    if (framesReceived == 0) {
+      return 'sending, but nothing has come back — the link is working in '
+          'one direction only';
+    }
+    if (packetsDecoded == 0) {
+      return 'receiving frames but decoding no packets — the two phones '
+          'disagree about the wire format';
     }
     return null;
   }
@@ -428,8 +452,10 @@ class BleMeshTransport extends MeshTransport {
   }
 
   void _onFrame(String peerId, Uint8List frame) {
+    diagnostics.framesReceived++;
     final buffer = _buffers.putIfAbsent(peerId, Reassembly.new);
     final packet = BleFraming.accept(buffer, frame);
+    if (packet != null) diagnostics.packetsDecoded++;
     if (packet != null && !_incoming.isClosed) {
       _peerIds.learn(peerId, packet);
       _incoming.add((from: _peerIds.nodeIdFor(peerId), packet: packet));
@@ -451,21 +477,44 @@ class BleMeshTransport extends MeshTransport {
         for (final frame in BleFraming.fragment(packet)) {
           await characteristic.write(frame, withoutResponse: false);
         }
+        diagnostics.sentAsCentral++;
+        diagnostics.sendError = null;
         return true;
-      } on Exception {
+      } on Exception catch (error) {
+        diagnostics.sendFailures++;
+        diagnostics.sendError = error.toString();
         _dropPeer(toNode);
         // Fall through: the peer may still be reachable inbound.
       }
     }
     // The peer connected to us, so answer it over our own notify
     // characteristic instead of dialling back.
+    //
+    // The whole packet goes down in one call, unlike the central path
+    // above: the Kotlin peripheral applies the identical
+    // [total][index][count] framing on its own side before notifying.
+    // Fragmenting here as well would wrap each frame in a second header
+    // and nothing would reassemble.
     final inboundLinkId = _peerIds.linkIdFor(toNode);
     if (_inboundPeers.contains(inboundLinkId)) {
-      return peripheral.send(
+      final ok = await peripheral.send(
         inboundLinkId,
         Uint8List.fromList(packet.encode()),
       );
+      if (ok) {
+        diagnostics.sentAsPeripheral++;
+        diagnostics.sendError = null;
+      } else {
+        diagnostics.sendFailures++;
+        diagnostics.sendError =
+            'the GATT server refused a notification to $inboundLinkId '
+            '(is the peer subscribed?)';
+      }
+      return ok;
     }
+    diagnostics.sendFailures++;
+    diagnostics.sendError = 'no route to $toNode: not connected as a '
+        'central, and not subscribed to us as a peer';
     return false;
   }
 

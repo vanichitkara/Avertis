@@ -19,6 +19,65 @@ Packet packetOfSize(int approxPayloadChars) => Packet.create(
 );
 
 void main() {
+  /// Both directions of a BLE link must put the same thing on the wire.
+  ///
+  /// A central writes to the peer's characteristic; a peripheral notifies
+  /// on its own. Different Android APIs, and the framing is applied in
+  /// different places — Dart fragments for the central path, the Kotlin
+  /// peripheral fragments for its own — but the receiving code is the
+  /// same on both sides and always reads a 4-byte header first.
+  ///
+  /// So the rule both paths have to keep is that exactly one of them
+  /// frames. Framing twice wraps each frame in a second header and
+  /// nothing reassembles; framing neither way means a packet's own first
+  /// bytes are read as [total][index][count] and nothing decodes.
+  group('what goes on the wire', () {
+    Packet report() => Packet.create(
+          packetId: 'pkt-aaaaaaaaaaaaaaaa',
+          originNode: 'n7ac20',
+          destination: anyGateway,
+          messageType: MessageType.sos,
+          priority: Priority.lifeCritical,
+          createdAt: DateTime.utc(2026, 10, 18, 12),
+          payload: const {
+            'report_id': 'rpt-1',
+            'node_id': 'n7ac20',
+            'text': 'three people trapped under the bridge, water rising',
+            'location': {'lat': 28.6861, 'lon': 77.1253, 'accuracy_m': 12.0},
+          },
+        );
+
+    Packet? feed(List<Uint8List> frames) {
+      final buffer = Reassembly();
+      Packet? out;
+      for (final frame in frames) {
+        out = BleFraming.accept(buffer, frame) ?? out;
+      }
+      return out;
+    }
+
+    test('a framed packet is reassembled', () {
+      final decoded = feed(BleFraming.fragment(report()));
+      expect(decoded, isNotNull);
+      expect(decoded!.packetId, 'pkt-aaaaaaaaaaaaaaaa');
+      expect(decoded.payload['report_id'], 'rpt-1');
+    });
+
+    test('an unframed packet is not', () {
+      final raw = Uint8List.fromList(report().encode());
+      expect(feed([raw]), isNull,
+          reason: 'the receiver reads the packet\'s own first bytes as a '
+              'fragment header, so something must frame it first');
+    });
+
+    test('every frame carries a header the receiver can read', () {
+      for (final frame in BleFraming.fragment(report())) {
+        expect(frame.length, greaterThanOrEqualTo(4));
+        expect(frame.length, lessThanOrEqualTo(safeFragmentBytes));
+      }
+    });
+  });
+
 
   test('a small packet still produces at least one frame', () {
     final frames = BleFraming.fragment(packetOfSize(1));

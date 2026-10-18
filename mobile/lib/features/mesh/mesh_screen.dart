@@ -312,6 +312,21 @@ class _TransportSwitch extends ConsumerWidget {
                   style: const TextStyle(
                       fontSize: 11, color: AvertisColors.textSecondary),
                 ),
+              Text(
+                'Traffic: sent ${diagnostics!.sentAsCentral} as central, '
+                '${diagnostics!.sentAsPeripheral} as peripheral · '
+                '${diagnostics!.sendFailures} send failure(s) · '
+                'received ${diagnostics!.framesReceived} frame(s) → '
+                '${diagnostics!.packetsDecoded} packet(s)',
+                style: const TextStyle(
+                    fontSize: 11, color: AvertisColors.textSecondary),
+              ),
+              if (diagnostics!.sendError != null)
+                Text(
+                  'Last send problem: ${diagnostics!.sendError}',
+                  style: const TextStyle(
+                      fontSize: 11, color: AvertisColors.operational),
+                ),
             ],
           ],
         ),
