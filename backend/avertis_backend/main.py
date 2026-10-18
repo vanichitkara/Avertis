@@ -124,6 +124,11 @@ def _reasoning_note() -> str:
     )
 
 
+# How many outstanding files one sync may ask for. A window is short and
+# the reports in it matter more than any photo.
+MAX_MEDIA_REQUESTS = 20
+
+
 # -- gateway -----------------------------------------------------------------
 
 
@@ -141,14 +146,30 @@ def gateway_sync(request: GatewaySyncRequest) -> GatewaySyncResponse:
         for report_id, incident_id, _ in result["outcomes"]
     ]
 
-    # Ask for the bytes behind any media descriptor we have not yet received.
+    # Ask for the bytes behind any media descriptor we have not yet
+    # received. Not only this batch's: a report relayed to us by a gateway
+    # carries a descriptor whose file is on a *different* handset, and that
+    # handset will never send this report again once the mesh has
+    # acknowledged it. Asking every syncing gateway for everything
+    # outstanding is how the one that holds the bytes eventually hears the
+    # question. A gateway without the file simply ignores it.
     held = store.list_media()
+    wanted: list[str] = []
     for report in request.incidents:
         for media in report.media:
-            if media.media_id not in held:
-                commands.append(
-                    GatewayCommand(type="REQUEST_MEDIA", media_id=media.media_id)
-                )
+            if media.media_id not in held and media.media_id not in wanted:
+                wanted.append(media.media_id)
+    for incident in store.list_incidents():
+        for evidence in incident.evidence:
+            for media in evidence.media:
+                if media.media_id not in held and media.media_id not in wanted:
+                    wanted.append(media.media_id)
+    # Bounded, so a long-running board cannot turn every sync into a list
+    # of hundreds of files nobody is going to send.
+    commands.extend(
+        GatewayCommand(type="REQUEST_MEDIA", media_id=media_id)
+        for media_id in wanted[:MAX_MEDIA_REQUESTS]
+    )
 
     return GatewaySyncResponse(
         received_at=iso(utcnow()),

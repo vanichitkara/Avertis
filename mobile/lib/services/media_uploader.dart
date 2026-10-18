@@ -164,6 +164,40 @@ class MediaUploader {
     return pending;
   }
 
+  /// Resolve specific media the backend has asked for by id.
+  ///
+  /// [pendingFor] only ever sees the reports in the current sync batch, and
+  /// a report acknowledged over the mesh is never in one again — its photo
+  /// would wait forever on a handset that has since found signal. The
+  /// backend knows which descriptors it holds no bytes for and says so with
+  /// REQUEST_MEDIA, so this answers that question from the stored reports
+  /// rather than from the batch.
+  List<PendingMedia> pendingByMediaId(
+    Iterable<({String reportId, List<dynamic> media})> stored,
+    Set<String> wanted,
+  ) {
+    final pending = <PendingMedia>[];
+    for (final report in stored) {
+      for (final raw in report.media) {
+        if (raw is! Map) continue;
+        final mediaId = raw['media_id'] as String?;
+        final path = raw['local_path'] as String?;
+        if (mediaId == null || path == null) continue;
+        if (!wanted.contains(mediaId)) continue;
+        if (_uploadedMediaIds.contains(mediaId)) continue;
+
+        pending.add(PendingMedia(
+          mediaId: mediaId,
+          reportId: report.reportId,
+          path: path,
+          bytes: (raw['bytes'] as num?)?.toInt() ?? 0,
+          kind: raw['kind'] as String? ?? 'IMAGE',
+        ));
+      }
+    }
+    return pending;
+  }
+
   /// Spend whatever the incident sync left of the window.
   ///
   /// Nothing here can fail the sync: every error path returns a count, never

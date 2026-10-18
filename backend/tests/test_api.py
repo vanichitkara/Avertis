@@ -397,3 +397,77 @@ class TestEvidenceLinking:
         assert response.json()["attached_to"] is None
         # And are still retrievable.
         assert client.get("/api/v1/media/med-orphan").status_code == 200
+
+
+def test_requests_media_it_is_still_missing_from_an_older_report(client):
+    """A relayed photo's bytes are on a handset that will not sync again.
+
+    Media descriptors cross the mesh; the bytes do not. So a report
+    relayed through a gateway names a file only its author holds, and the
+    author's own report leaves custody the moment the mesh acknowledges
+    it — it is never in a sync batch again.
+
+    Asking only about the batch in front of us therefore never reaches
+    the one handset that can answer. Every syncing gateway is asked about
+    everything outstanding; the ones without the file ignore it.
+    """
+    first = client.post("/api/v1/gateway/sync", json={
+        "gateway_id": "gw-relay",
+        "source": "DEVICE",
+        "incidents": [{
+            "report_id": "rpt-photo",
+            "origin_node": "n2b5cd",
+            "created_at": "2026-10-18T21:04:00Z",
+            "priority": "LIFE_CRITICAL",
+            "text": "trapped under a building",
+            "location": {"lat": 28.686, "lon": 77.125},
+            "media": [{"media_id": "med-orphan", "kind": "IMAGE",
+                       "bytes": 135122}],
+        }],
+    })
+    assert first.status_code == 200
+    assert any(c["type"] == "REQUEST_MEDIA" and c["media_id"] == "med-orphan"
+               for c in first.json()["commands"])
+
+    # The author syncs later, carrying no reports at all — everything it
+    # had was acknowledged over the mesh. It must still be asked.
+    second = client.post("/api/v1/gateway/sync", json={
+        "gateway_id": "gw-author",
+        "source": "DEVICE",
+        "incidents": [],
+    })
+    assert second.status_code == 200
+    assert any(c["type"] == "REQUEST_MEDIA" and c["media_id"] == "med-orphan"
+               for c in second.json()["commands"]), \
+        "the only handset holding the file is never told it is wanted"
+
+
+def test_stops_asking_once_the_bytes_arrive(client):
+    client.post("/api/v1/gateway/sync", json={
+        "gateway_id": "gw-relay",
+        "source": "DEVICE",
+        "incidents": [{
+            "report_id": "rpt-photo-2",
+            "origin_node": "n2b5cd",
+            "created_at": "2026-10-18T21:04:00Z",
+            "priority": "LIFE_CRITICAL",
+            "text": "trapped under a building",
+            "location": {"lat": 28.686, "lon": 77.125},
+            "media": [{"media_id": "med-arrives", "kind": "IMAGE",
+                       "bytes": 12}],
+        }],
+    })
+
+    uploaded = client.post(
+        "/api/v1/media/upload",
+        data={"media_id": "med-arrives", "report_id": "rpt-photo-2"},
+        files={"file": ("photo.jpg", b"imagebytes!!", "image/jpeg")},
+    )
+    assert uploaded.status_code == 200
+
+    again = client.post("/api/v1/gateway/sync", json={
+        "gateway_id": "gw-author", "source": "DEVICE", "incidents": [],
+    })
+    assert not any(c["media_id"] == "med-arrives"
+                   for c in again.json()["commands"]), \
+        "a window is short; do not keep asking for a file we have"

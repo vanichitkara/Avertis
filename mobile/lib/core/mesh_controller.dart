@@ -3,6 +3,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -399,6 +400,7 @@ class MeshController extends ChangeNotifier {
         uploader: MediaUploader(
           backend: HttpMediaBackend(baseUrl: apiBase, apiKey: apiKey),
         ),
+        storedMedia: _storedMedia,
       );
     }
 
@@ -729,6 +731,25 @@ class MeshController extends ChangeNotifier {
     return packet;
   }
 
+  /// Media descriptors from every report on this handset, for answering
+  /// the backend's REQUEST_MEDIA.
+  Future<List<({String reportId, List<dynamic> media})>> _storedMedia() async {
+    final rows = await database.allReports();
+    final out = <({String reportId, List<dynamic> media})>[];
+    for (final row in rows) {
+      if (row.mediaJson.isEmpty || row.mediaJson == '[]') continue;
+      try {
+        final decoded = jsonDecode(row.mediaJson);
+        if (decoded is List && decoded.isNotEmpty) {
+          out.add((reportId: row.reportId, media: decoded));
+        }
+      } on FormatException {
+        // A row written by an older build. Not worth failing a sync over.
+      }
+    }
+    return out;
+  }
+
   Future<void> _persist(
     Packet packet, {
     required String kind,
@@ -736,12 +757,20 @@ class MeshController extends ChangeNotifier {
     int? peopleCount,
   }) async {
     final location = packet.payload['location'] as Map<String, dynamic>?;
+    // Keep the media descriptors, local paths and all. They are the only
+    // record that a photo exists: the packet carrying them is discarded
+    // once the mesh acknowledges the report, and an SOS sent from a phone
+    // with no internet is acknowledged by a neighbour long before this
+    // handset ever gets a chance to upload the bytes. Without this the
+    // photo is orphaned the moment the relay works.
+    final media = packet.payload['media'];
     await database.insertReport(ReportsCompanion.insert(
       reportId: packet.payload['report_id'] as String,
       packetId: packet.packetId,
       kind: kind,
       priority: packet.priority.wire,
       body: Value(body),
+      mediaJson: Value(jsonEncode(media is List ? media : const [])),
       lat: Value((location?['lat'] as num?)?.toDouble()),
       lon: Value((location?['lon'] as num?)?.toDouble()),
       accuracyM: Value((location?['accuracy_m'] as num?)?.toDouble()),

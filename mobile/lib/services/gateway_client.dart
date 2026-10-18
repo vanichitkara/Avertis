@@ -146,6 +146,7 @@ class GatewayClient {
     required this.backend,
     required this.bus,
     this.uploader,
+    this.storedMedia,
   });
 
   final MeshEngine engine;
@@ -155,6 +156,17 @@ class GatewayClient {
   /// Optional: without it, media descriptors still sync and the bytes simply
   /// stay on the device. Reports are never held back waiting for photos.
   final MediaUploader? uploader;
+
+  /// Every media descriptor this handset has on disk, however old the
+  /// report. Supplied by the controller, which owns the database.
+  ///
+  /// Without it the only uploadable media is whatever happens to be in the
+  /// current batch, and a report acknowledged over the mesh is never in a
+  /// batch again — so a photo attached on a phone with no internet could
+  /// never reach the backend, which is precisely the case the product
+  /// exists for.
+  final Future<List<({String reportId, List<dynamic> media})>> Function()?
+      storedMedia;
 
   final Set<String> _syncedReportIds = {};
 
@@ -419,6 +431,38 @@ class GatewayClient {
         pending,
         budgetBytes: (budget - used).clamp(0, maxSyncBytes),
       );
+    }
+
+    // The backend lists the descriptors it holds no bytes for. Answer as
+    // many as the rest of the window affords — after the reports, and
+    // after this batch's own media, because an old photo must never crowd
+    // out a new person.
+    final requested = ((response['commands'] as List?) ?? const [])
+        .whereType<Map>()
+        .where((c) => c['type'] == 'REQUEST_MEDIA')
+        .map((c) => c['media_id'])
+        .whereType<String>()
+        .toSet();
+    if (uploader != null && storedMedia != null && requested.isNotEmpty) {
+      final remaining =
+          (budget - used - mediaResult.bytesSent).clamp(0, maxSyncBytes);
+      if (remaining > 0) {
+        final backlog = uploader!.pendingByMediaId(
+          await storedMedia!(),
+          requested,
+        );
+        if (backlog.isNotEmpty) {
+          final extra =
+              await uploader!.upload(backlog, budgetBytes: remaining);
+          mediaResult = MediaUploadResult(
+            uploaded: mediaResult.uploaded + extra.uploaded,
+            deferred: mediaResult.deferred + extra.deferred,
+            failed: mediaResult.failed + extra.failed,
+            bytesSent: mediaResult.bytesSent + extra.bytesSent,
+            uris: {...mediaResult.uris, ...extra.uris},
+          );
+        }
+      }
     }
 
     bus.emit(MeshEvent(MeshEventType.syncCompleted, engine.nodeId, {
