@@ -444,14 +444,13 @@ class BleMeshTransport extends MeshTransport {
           rssi: result.rssi,
         ),
       );
-      _sightings[peerId] = (_sightings[peerId] ?? 0) + 1;
+      _firstSeenInWindow.putIfAbsent(peerId, () => diagnostics.scanWindows);
       if (_shouldDial(peerId)) {
         diagnostics.waitingForPeerToDial = false;
         unawaited(_ensureConnected(peerId, result.device));
       } else {
-        diagnostics.waitingForPeerToDial =
-            !_writeChars.containsKey(peerId) &&
-                !_inboundPeers.contains(_peerIds.linkIdFor(peerId));
+        diagnostics.waitingForPeerToDial = !_writeChars.containsKey(peerId) &&
+            !_inboundPeers.contains(_peerIds.linkIdFor(peerId));
       }
     }
   }
@@ -476,9 +475,14 @@ class BleMeshTransport extends MeshTransport {
     return 1.0;
   }
 
-  /// How many scan windows a peer has been seen in, used to decide when
-  /// to stop waiting for it to call us.
-  final Map<String, int> _sightings = {};
+  /// The scan window a peer was first seen in, used to decide when to
+  /// stop waiting for it to call us.
+  ///
+  /// Counted in windows, not in scan results: `scanResults` emits many
+  /// times inside one four-second window, so counting callbacks reached
+  /// the threshold within the first window and the node dialled
+  /// immediately — which is the whole thing this was meant to avoid.
+  final Map<String, int> _firstSeenInWindow = {};
 
   /// Whether to be the one that dials.
   ///
@@ -506,9 +510,22 @@ class BleMeshTransport extends MeshTransport {
     if (dialsFirst(nodeId, peerId)) return true;
 
     // We are the higher id, so this peer should be dialling us.
-    final theirLink = _peerIds.linkIdFor(peerId);
-    if (_inboundPeers.contains(theirLink)) return false;
-    return (_sightings[peerId] ?? 0) > waitScansBeforeDialling;
+    //
+    // An inbound peer is a device address until a HELLO names it, so
+    // there is a window in which it cannot be matched to this node id.
+    // Dialling during that window recreates the double connection this
+    // exists to avoid, so an inbound peer we cannot yet name is treated
+    // as possibly being this one. Inbound peers we *can* name and that
+    // are somebody else do not hold us up, which matters once there are
+    // more than two phones.
+    if (_inboundPeers.contains(_peerIds.linkIdFor(peerId))) return false;
+    final anyUnnamedInbound =
+        _inboundPeers.any((link) => _peerIds.nodeIdFor(link) == link);
+    if (anyUnnamedInbound) return false;
+
+    final firstSeen = _firstSeenInWindow[peerId];
+    if (firstSeen == null) return false;
+    return diagnostics.scanWindows - firstSeen >= waitScansBeforeDialling;
   }
 
   /// Set up a peer we found by scanning, once.
@@ -740,7 +757,7 @@ class BleMeshTransport extends MeshTransport {
     }
     _connSubs.clear();
     _connecting.clear();
-    _sightings.clear();
+    _firstSeenInWindow.clear();
     for (final device in _devices.values) {
       try {
         await device.disconnect();
