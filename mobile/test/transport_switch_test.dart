@@ -107,4 +107,44 @@ void main() {
       controller.dispose();
     });
   });
+
+  group('why a report is still waiting', () {
+    test('no backend configured says so, and says what will happen', () async {
+      final controller = MeshController(database: db, apiBase: '');
+      await controller.start(nodeId: 'node-test');
+
+      final reason = controller.pendingReason();
+      expect(reason, contains('No command centre configured'));
+      expect(reason, contains('relay'));
+
+      controller.dispose();
+    });
+
+    test('a configured but unreachable backend names the internet',
+        () async {
+      final controller =
+          MeshController(database: db, apiBase: 'http://127.0.0.1:9');
+      await controller.start(nodeId: 'node-test');
+
+      // Reachability has not succeeded, so the app must not imply it has.
+      expect(controller.pendingReason(), contains('No internet'));
+
+      controller.dispose();
+    });
+
+    test('every branch names something that would unblock it', () async {
+      // "Waiting for acknowledgement" alone reads identically whether
+      // delivery is seconds away or impossible.
+      for (final base in ['', 'http://127.0.0.1:9']) {
+        final controller = MeshController(database: db, apiBase: base);
+        await controller.start(nodeId: 'node-test');
+        final reason = controller.pendingReason();
+
+        expect(reason, isNotEmpty);
+        expect(reason.length, greaterThan(40),
+            reason: 'a bare status is what this replaces');
+        controller.dispose();
+      }
+    });
+  });
 }

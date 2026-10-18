@@ -122,6 +122,37 @@ class MeshController extends ChangeNotifier {
   GatewayClient? get gateway => _gateway;
   bool get hasBackend => apiBase.isNotEmpty;
 
+  /// Why an unacknowledged report has not gone yet.
+  ///
+  /// "Waiting for acknowledgement" on its own is not good enough for a
+  /// life-critical report: it reads the same whether delivery is seconds
+  /// away or impossible, and leaves the sender with no idea whether to
+  /// find a signal, find a person, or wait. Each branch names the thing
+  /// that would unblock it.
+  String pendingReason() {
+    final neighbours = _engine?.state.liveNeighbors.length ?? 0;
+
+    if (!hasBackend) {
+      return neighbours > 0
+          ? 'Relaying through $neighbours nearby device(s). This build has '
+              'no command centre configured, so it travels by mesh only.'
+          : 'No command centre configured in this build, and no devices in '
+              'range. It is saved here and will relay to the first device '
+              'that appears.';
+    }
+
+    if (!_internetOnline) {
+      return neighbours > 0
+          ? 'No internet. Relaying through $neighbours nearby device(s) '
+              'towards one that has a connection.'
+          : 'No internet and no devices in range. It is saved here and '
+              'sends automatically as soon as either appears.';
+    }
+
+    return 'Connected — sending at the next window, within about 20 '
+        'seconds. If it stays here, the command centre is rejecting it.';
+  }
+
   /// Why this node is not discoverable, when it is not.
   ///
   /// A node that scans but cannot advertise is only half a mesh node: it finds

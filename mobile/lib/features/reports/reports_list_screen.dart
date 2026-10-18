@@ -37,7 +37,11 @@ class ReportsListScreen extends ConsumerWidget {
                   padding: const EdgeInsets.all(16),
                   itemCount: rows.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => _ReportCard(report: rows[i]),
+                  itemBuilder: (_, i) => _ReportCard(
+                    report: rows[i],
+                    pendingReason:
+                        ref.watch(meshControllerProvider).pendingReason(),
+                  ),
                 ),
         ),
       ),
@@ -46,9 +50,12 @@ class ReportsListScreen extends ConsumerWidget {
 }
 
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({required this.report});
+  const _ReportCard({required this.report, required this.pendingReason});
 
   final Report report;
+
+  /// What is holding an unacknowledged report up, in plain words.
+  final String pendingReason;
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +137,18 @@ class _ReportCard extends StatelessWidget {
                 ],
               ],
             ),
+            // Say what is actually holding it up. Without this the same
+            // line appears whether delivery is twenty seconds away or
+            // impossible.
+            if (!report.acknowledged)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 20),
+                child: Text(
+                  pendingReason,
+                  style: const TextStyle(
+                      fontSize: 11, color: AvertisColors.textSecondary),
+                ),
+              ),
             if (report.incidentId != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
