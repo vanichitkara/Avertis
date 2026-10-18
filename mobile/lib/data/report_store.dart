@@ -18,7 +18,7 @@ part 'report_store.g.dart';
 class Reports extends Table {
   TextColumn get reportId => text()();
   TextColumn get packetId => text()();
-  TextColumn get kind => text()();            // SOS | REPORT
+  TextColumn get kind => text()(); // SOS | REPORT
   TextColumn get priority => text()();
   // Named `body`, not `text`: `text` collides with Drift's own
   // Table.text() column builder.
@@ -58,9 +58,9 @@ class ReportDatabase extends _$ReportDatabase {
   Future<List<Report>> allReports() =>
       (select(reports)..orderBy([(r) => OrderingTerm.desc(r.createdAt)])).get();
 
-  Stream<List<Report>> watchReports() =>
-      (select(reports)..orderBy([(r) => OrderingTerm.desc(r.createdAt)]))
-          .watch();
+  Stream<List<Report>> watchReports() => (select(
+    reports,
+  )..orderBy([(r) => OrderingTerm.desc(r.createdAt)])).watch();
 
   /// Reports this device has not seen acknowledged. These are re-offered to
   /// the mesh on launch.
@@ -68,26 +68,37 @@ class ReportDatabase extends _$ReportDatabase {
       (select(reports)..where((r) => r.acknowledged.equals(false))).get();
 
   Future<void> markAcknowledged(String reportId, DateTime at) =>
-      (update(reports)..where((r) => r.reportId.equals(reportId)))
-          .write(ReportsCompanion(
-        acknowledged: const Value(true),
-        acknowledgedAt: Value(at),
-      ));
+      (update(reports)..where((r) => r.reportId.equals(reportId))).write(
+        ReportsCompanion(
+          acknowledged: const Value(true),
+          acknowledgedAt: Value(at),
+        ),
+      );
 
   Future<void> recordRetransmission(String reportId) async {
-    final row = await (select(reports)
-          ..where((r) => r.reportId.equals(reportId)))
-        .getSingleOrNull();
+    final row = await (select(
+      reports,
+    )..where((r) => r.reportId.equals(reportId))).getSingleOrNull();
     if (row == null) return;
-    await (update(reports)..where((r) => r.reportId.equals(reportId)))
-        .write(ReportsCompanion(
-      retransmissions: Value(row.retransmissions + 1),
-    ));
+    await (update(reports)..where((r) => r.reportId.equals(reportId))).write(
+      ReportsCompanion(retransmissions: Value(row.retransmissions + 1)),
+    );
   }
 
+  /// Remove reports the command centre has confirmed it holds.
+  ///
+  /// Only acknowledged ones. An unacknowledged report is the only copy
+  /// that exists — nobody else has it yet — so a tidy-up must not be able
+  /// to delete someone's undelivered SOS. Returns how many went.
+  Future<int> deleteAcknowledged() =>
+      (delete(reports)..where((r) => r.acknowledged.equals(true))).go();
+
+  Future<int> countUnacknowledged() async => (await unacknowledged()).length;
+
   Future<void> attachIncidentId(String reportId, String incidentId) =>
-      (update(reports)..where((r) => r.reportId.equals(reportId)))
-          .write(ReportsCompanion(incidentId: Value(incidentId)));
+      (update(reports)..where((r) => r.reportId.equals(reportId))).write(
+        ReportsCompanion(incidentId: Value(incidentId)),
+      );
 }
 
 LazyDatabase _openConnection() {

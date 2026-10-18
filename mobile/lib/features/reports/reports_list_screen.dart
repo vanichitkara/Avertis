@@ -24,7 +24,16 @@ class ReportsListScreen extends ConsumerWidget {
     final reports = ref.watch(reportsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('MY REPORTS')),
+      appBar: AppBar(
+        title: const Text('MY REPORTS'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: 'Clear delivered reports',
+            onPressed: () => _clearDelivered(context, ref),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: reports.when(
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -55,6 +64,57 @@ class ReportsListScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Remove reports the command centre already holds.
+///
+/// Deliberately only the delivered ones. An unacknowledged report is the
+/// only copy in existence, so no amount of tidying should be able to
+/// discard someone's undelivered SOS.
+Future<void> _clearDelivered(BuildContext context, WidgetRef ref) async {
+  final database = ref.read(databaseProvider);
+  final waiting = await database.countUnacknowledged();
+  if (!context.mounted) return;
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Clear delivered reports?'),
+      content: Text(
+        waiting == 0
+            ? 'Removes reports the command centre has confirmed it holds. '
+                  'They stay on the command centre; only this phone\'s copy '
+                  'goes.'
+            : 'Removes reports the command centre has confirmed it holds.\n\n'
+                  '$waiting report(s) still waiting to be sent will be kept — '
+                  'this phone has the only copy.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('CANCEL'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('CLEAR'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+
+  final removed = await database.deleteAcknowledged();
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        removed == 0
+            ? 'Nothing to clear — no reports have been delivered yet.'
+            : 'Cleared $removed delivered report(s)'
+                  '${waiting > 0 ? ', kept $waiting still waiting' : ''}.',
+      ),
+    ),
+  );
 }
 
 /// Show what the command centre made of this report.
